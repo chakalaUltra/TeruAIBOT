@@ -2,9 +2,6 @@
   "1117540437016727612": {
     "user_id": 1117540437016727612,
     "sample_messages": [
-      "Set free",
-      "Nga",
-      "How so?",
       "It first happened to me too",
       "Hold up",
       "\"Why is he stopping to reply after time? I ask him something, he types something then completely stops without a word.\"",
@@ -26,12 +23,15 @@
       "Nah, i like it this way",
       "So how are you?",
       "Bro",
-      "Teru"
+      "Teru",
+      "Right",
+      "Teru, watchu think",
+      "Alright, thanks"
     ],
     "favorite_words": {
       "tery": 1,
       "hey": 7,
-      "teru": 9,
+      "teru": 10,
       "how": 6,
       "you": 13,
       "doing": 2,
@@ -195,13 +195,17 @@
       "having": 1,
       "stop": 1,
       "keyword": 1,
-      "right": 1,
+      "right": 2,
       "dude": 1,
       "nah": 1,
-      "like": 1
+      "like": 1,
+      "watchu": 1,
+      "think": 1,
+      "alright": 1,
+      "thanks": 1
     },
-    "average_length": 20.19780219780221,
-    "message_count": 91,
+    "average_length": 19.95744680851065,
+    "message_count": 94,
     "notes": []
   },
   "877122546695307315": {

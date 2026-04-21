@@ -1167,16 +1167,55 @@ async def on_message(message: discord.Message):
     mentioned = bot.user in message.mentions
     addressed = mentioned or addresses_teru(lower)
 
-    # Continue the conversation if Teru replied in this channel very recently —
-    # avoids forcing the owner to say "Teru" every single message.
+    # Detect if the owner is clearly talking to someone else, not Teru.
+    talking_to_other = False
+    # 1. Replying (Discord reply feature) to a non-Teru user.
+    if message.reference and isinstance(message.reference.resolved, discord.Message):
+        if message.reference.resolved.author.id != bot.user.id:
+            talking_to_other = True
+    # 2. Mentions another user (and not Teru).
+    other_mentions = [u for u in message.mentions if u.id != bot.user.id and not u.bot]
+    if other_mentions:
+        talking_to_other = True
+    # 3. Starts with another member's name + comma (e.g. "Alex, ...").
+    head = re.match(r"^([A-Za-z][\w\-]{1,30})[,:]\s", message.content or "")
+    if head:
+        name = head.group(1).lower()
+        if name != "teru" and message.guild:
+            for m in message.guild.members:
+                if m.id == message.author.id or m.bot:
+                    continue
+                if m.display_name.lower().startswith(name) or m.name.lower().startswith(name):
+                    talking_to_other = True
+                    break
+
+    # If addressing someone else explicitly, stay quiet (even if mid-conversation).
+    if talking_to_other and not addressed:
+        if is_active(cid):
+            push_history(cid, "user", f"{message.author.display_name}: {message.content}")
+        await bot.process_commands(message)
+        return
+
+    # Otherwise, allow follow-ups within a short window — but only if the
+    # previous message in the channel was actually FROM Teru (i.e. the owner
+    # is continuing the back-and-forth, not addressing a third party who chimed in).
     last = LAST_REPLY_AT.get(cid)
+    last_was_teru = False
+    try:
+        async for prev in message.channel.history(limit=2, before=message):
+            if prev.author.id != message.author.id:
+                last_was_teru = prev.author.id == bot.user.id
+                break
+    except discord.HTTPException:
+        pass
+
     in_followup = bool(
         last
+        and last_was_teru
         and (datetime.now(timezone.utc) - last).total_seconds() < FOLLOWUP_WINDOW_SECONDS
     )
 
     if not addressed and not in_followup:
-        # Stay quiet, but keep the message in history for context if active.
         if is_active(cid):
             push_history(cid, "user", f"{message.author.display_name}: {message.content}")
         await bot.process_commands(message)
