@@ -675,6 +675,10 @@ async def _handle_utterance(user_id: int, pcm: bytes) -> None:
 
         print(f"[{BOT_NAME}] Heard {member.display_name}: {text}")
 
+        # Only respond if Teru was actually addressed in the utterance.
+        if not addresses_teru(text):
+            return
+
         # Choose a text channel to mirror the conversation in.
         text_channel = None
         for ch in guild.text_channels:
@@ -950,6 +954,17 @@ def matches_wake(text: str) -> bool:
     return any(re.search(p, t) for p in WAKE_PHRASES)
 
 
+def addresses_teru(text: str) -> bool:
+    """True when the message is clearly directed at Teru."""
+    t = text.lower().strip()
+    if not t:
+        return False
+    # Wake phrase, or "teru" appearing as a standalone word anywhere.
+    if matches_wake(t):
+        return True
+    return re.search(r"\bteru\b", t) is not None
+
+
 def matches_sleep(text: str) -> bool:
     t = text.lower().strip().rstrip("!.?")
     return t in SLEEP_PHRASES or any(t.startswith(p) for p in SLEEP_PHRASES)
@@ -1137,13 +1152,19 @@ async def on_message(message: discord.Message):
         return
 
     mentioned = bot.user in message.mentions
-    woke_now = matches_wake(lower) or mentioned
+    addressed = mentioned or addresses_teru(lower)
 
-    if not is_active(cid) and not woke_now:
+    # Strict rule: only reply when explicitly addressed. Even if a previous
+    # conversation is still "active", stay quiet when the owner is talking to
+    # someone else, until they say "Teru" again.
+    if not addressed:
+        # Still keep the message in history for context if the channel was active.
+        if is_active(cid):
+            push_history(cid, "user", f"{message.author.display_name}: {message.content}")
         await bot.process_commands(message)
         return
 
-    if woke_now and not is_active(cid):
+    if not is_active(cid):
         activate(cid)
         push_history(
             cid,
