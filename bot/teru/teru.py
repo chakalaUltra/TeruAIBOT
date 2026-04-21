@@ -485,30 +485,41 @@ async def on_message(message: discord.Message):
         reply = await chat(msgs)
     push_history(cid, "assistant", reply)
 
-    # Occasionally attach a follow-up suggestion view.
-    if random.random() < 0.18 and len(reply) < 600:
-        suggestion = await chat(
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        "Based on your last reply, propose ONE short follow-up "
-                        "suggestion (under 18 words) the user might enjoy. "
-                        "Just the suggestion, no preamble."
-                    ),
-                },
-                {"role": "assistant", "content": reply},
-            ],
-            max_tokens=80,
-        )
-        embed = discord.Embed(
-            description=f"{ICONS['spark']} {suggestion}",
-            color=ACCENT_COLOR,
-        )
-        await message.channel.send(reply, embed=embed, view=SuggestionView(suggestion))
-    else:
-        await message.channel.send(reply)
+    await message.channel.send(reply)
+
+    # Occasionally drop a separate, unprompted follow-up suggestion.
+    if random.random() < 0.25 and len(reply) < 800:
+        async def _send_followup():
+            await asyncio.sleep(random.uniform(2.5, 5.5))
+            suggestion = await chat(
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Generate ONE unprompted follow-up thought for "
+                            f"{message.author.display_name} — something a "
+                            "thoughtful AI assistant would mention out of the "
+                            "blue (a trending song, a news headline, a server "
+                            "tip, a question about their day, a recommendation). "
+                            "It should NOT be tied to what was just discussed. "
+                            "Under 22 words. Just the thought, no preamble."
+                        ),
+                    },
+                ],
+                max_tokens=100,
+            )
+            embed = discord.Embed(
+                title=f"{ICONS['spark']} While you're here…",
+                description=suggestion,
+                color=ACCENT_COLOR,
+            )
+            try:
+                await message.channel.send(embed=embed, view=SuggestionView(suggestion))
+            except discord.HTTPException:
+                pass
+
+        asyncio.create_task(_send_followup())
 
     await bot.process_commands(message)
 
