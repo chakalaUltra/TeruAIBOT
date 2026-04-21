@@ -440,6 +440,37 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "send_image",
+            "description": (
+                "Search the internet for an image (or GIF) and post it in the channel. "
+                "Use kind='gif' for animated clips/memes, kind='image' for photos."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["image", "gif"]},
+                    "count": {"type": "integer", "description": "1-4 results.", "minimum": 1, "maximum": 4},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_video",
+            "description": "Search the internet for a video clip and post the link in the channel.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "revoke_listen_access",
             "description": (
                 "Revoke previously granted access for a member, or pass 'all' to revoke everyone."
@@ -728,6 +759,22 @@ async def _execute_tool(
 
         if name == "web_lookup":
             return await web_search(args["query"])
+
+        if name == "send_image":
+            kind = args.get("kind", "image")
+            count = max(1, min(int(args.get("count", 1)), 4))
+            urls = await search_media(args["query"], kind=kind, count=count)
+            if not urls:
+                return f"Couldn't find any {kind}s for '{args['query']}'."
+            await channel.send("\n".join(urls))
+            return f"Posted {len(urls)} {kind}(s) for '{args['query']}'."
+
+        if name == "send_video":
+            urls = await search_media(args["query"], kind="video", count=1)
+            if not urls:
+                return f"Couldn't find a clip for '{args['query']}'."
+            await channel.send(urls[0])
+            return f"Posted a clip for '{args['query']}'."
 
         if name == "join_user_voice":
             if not invoker.voice or not invoker.voice.channel:
@@ -1111,6 +1158,52 @@ async def chat_with_tools(
                 }
             )
     return "Done." if not msg.content else msg.content.strip()
+
+
+async def _ddg_vqd(query: str, session: aiohttp.ClientSession) -> str | None:
+    async with session.get(
+        "https://duckduckgo.com/", params={"q": query}, timeout=15
+    ) as r:
+        text = await r.text()
+    m = re.search(r"vqd=['\"]?([\d-]+)", text)
+    return m.group(1) if m else None
+
+
+async def search_media(query: str, kind: str = "image", count: int = 1) -> list[str]:
+    """Return up to `count` media URLs. kind: image | gif | video."""
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://duckduckgo.com/",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+    }
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            vqd = await _ddg_vqd(query, session)
+            if not vqd:
+                return []
+            if kind == "video":
+                endpoint = "https://duckduckgo.com/v.js"
+                params = {"l": "us-en", "o": "json", "q": query, "vqd": vqd, "p": "1"}
+            else:
+                endpoint = "https://duckduckgo.com/i.js"
+                f = "type:gif" if kind == "gif" else ""
+                params = {
+                    "l": "us-en", "o": "json", "q": query, "vqd": vqd,
+                    "f": f",{f},,", "p": "1",
+                }
+            async with session.get(endpoint, params=params, timeout=15) as r:
+                data = await r.json(content_type=None)
+            results = data.get("results", []) or []
+            urls: list[str] = []
+            for item in results:
+                u = item.get("image") or item.get("content") or item.get("url")
+                if u:
+                    urls.append(u)
+                if len(urls) >= count:
+                    break
+            return urls
+    except Exception:
+        return []
 
 
 async def web_search(query: str) -> str:
