@@ -675,8 +675,15 @@ async def _handle_utterance(user_id: int, pcm: bytes) -> None:
 
         print(f"[{BOT_NAME}] Heard {member.display_name}: {text}")
 
-        # Only respond if Teru was actually addressed in the utterance.
-        if not addresses_teru(text):
+        # Only respond if Teru was addressed — OR a follow-up window is open
+        # because he just replied recently in voice.
+        vc_channel_id = guild.voice_client.channel.id
+        last = LAST_REPLY_AT.get(vc_channel_id)
+        in_followup = bool(
+            last
+            and (datetime.now(timezone.utc) - last).total_seconds() < FOLLOWUP_WINDOW_SECONDS
+        )
+        if not addresses_teru(text) and not in_followup:
             return
 
         # Choose a text channel to mirror the conversation in.
@@ -723,6 +730,7 @@ async def _handle_utterance(user_id: int, pcm: bytes) -> None:
                     )
                 except discord.HTTPException:
                     pass
+            LAST_REPLY_AT[guild.voice_client.channel.id] = datetime.now(timezone.utc)
             await speak_in_voice(guild, reply)
     finally:
         VOICE_PROCESSING.discard(user_id)
@@ -922,6 +930,10 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # Channels currently in active conversation with Teru: channel_id -> last activity ts.
 ACTIVE_CHANNELS: dict[int, datetime] = {}
+# Channels where Teru recently replied — short follow-up window so the owner
+# doesn't have to keep saying "Teru" every message.
+LAST_REPLY_AT: dict[int, datetime] = {}
+FOLLOWUP_WINDOW_SECONDS = 90
 # Per-channel rolling conversation history (last ~12 turns).
 HISTORY: dict[int, list[dict]] = {}
 
@@ -1146,6 +1158,7 @@ async def on_message(message: discord.Message):
     if is_active(cid) and matches_sleep(lower):
         deactivate(cid)
         HISTORY.pop(cid, None)
+        LAST_REPLY_AT.pop(cid, None)
         await message.channel.send(
             f"{ICONS['moon']} Standing down. Call me with **Hey {BOT_NAME}** when you need me."
         )
@@ -1154,11 +1167,16 @@ async def on_message(message: discord.Message):
     mentioned = bot.user in message.mentions
     addressed = mentioned or addresses_teru(lower)
 
-    # Strict rule: only reply when explicitly addressed. Even if a previous
-    # conversation is still "active", stay quiet when the owner is talking to
-    # someone else, until they say "Teru" again.
-    if not addressed:
-        # Still keep the message in history for context if the channel was active.
+    # Continue the conversation if Teru replied in this channel very recently —
+    # avoids forcing the owner to say "Teru" every single message.
+    last = LAST_REPLY_AT.get(cid)
+    in_followup = bool(
+        last
+        and (datetime.now(timezone.utc) - last).total_seconds() < FOLLOWUP_WINDOW_SECONDS
+    )
+
+    if not addressed and not in_followup:
+        # Stay quiet, but keep the message in history for context if active.
         if is_active(cid):
             push_history(cid, "user", f"{message.author.display_name}: {message.content}")
         await bot.process_commands(message)
@@ -1209,6 +1227,7 @@ async def on_message(message: discord.Message):
 
     if reply:
         await message.channel.send(reply)
+        LAST_REPLY_AT[cid] = datetime.now(timezone.utc)
         asyncio.create_task(speak_in_voice(message.guild, reply))
 
     # Rarely drop a separate, unprompted follow-up suggestion.
