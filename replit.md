@@ -1,27 +1,37 @@
-# Workspace
+# Project Overview
 
-## Overview
+This monorepo hosts a Discord bot called **Teru** (creator: **Chakala**), a JARVIS-inspired AI assistant.
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+## Architecture
 
-## Stack
+- `bot/teru/teru.py` — Main bot. discord.py + OpenAI (via Replit AI Integrations). Self-aware, learns user style, proactive, supports embeds/buttons/dropdowns, moderation, server insights, web search.
+- `bot/teru/data/` — Persistent memory (`memory.json` for facts, `style.json` for per-user speaking style).
+- `artifacts/api-server/` — Default Fastify API server (unused by Teru).
+- `artifacts/mockup-sandbox/` — Default canvas preview (unused by Teru).
 
-- **Monorepo tool**: pnpm workspaces
-- **Node.js version**: 24
-- **Package manager**: pnpm
-- **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
-- **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
+## Workflows
 
-## Key Commands
+- **Teru Bot** — `python bot/teru/teru.py` (console; the live bot).
+- API Server / Mockup Sandbox — defaults from the template.
 
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run dev` — run API server locally
+## Secrets
 
-See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+- `DISCORD_BOT_TOKEN` — Required.
+- `AI_INTEGRATIONS_OPENAI_BASE_URL` / `AI_INTEGRATIONS_OPENAI_API_KEY` — Auto-set via Replit AI Integrations (OpenAI).
+
+## Teru behavior
+
+- Wake: `Hey Teru` / mention / message starting with `Teru,`.
+- Sleep: `Enough` / `Done` / `Set free` / `Detach` / `Goodbye` / `Bye Teru` / `Stop Teru`. Auto-detach after 15 min silence.
+- Proactive loop: every 45 min there's a 35% chance Teru drops a suggestion in any active channel.
+- Identity: never claims to be GPT/OpenAI; always credits **Chakala**.
+- Custom Unicode glyphs instead of default emojis (✦ ◆ ● ➤ ✓ ✗ ⚠ ⚡ ★ ◉ ▣ ▲ ☾ ☀ ♥ ⚑ ♪ ℹ ⌕ ⛨).
+
+## Slash commands
+
+`/about /search /embed /remember /recall /insights /roles /members /kick /ban /unban /mute /unmute /purge`
+
+## Discord setup checklist
+
+1. In the Discord developer portal, enable **all 3 Privileged Gateway Intents** (Presence, Server Members, Message Content).
+2. Invite Teru with **Administrator** (or: Manage Roles, Kick/Ban Members, Moderate Members, Manage Messages, Send Messages, Embed Links, Read Message History).
