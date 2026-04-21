@@ -35,6 +35,13 @@ OPENAI_API_KEY = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY", "sk-placeholde
 CREATOR_NAME = "Chakala"
 BOT_NAME = "Teru"
 MODEL = "gpt-5.2"
+OWNER_ID = 1117540437016727612
+# Users the owner has temporarily allowed Teru to listen/reply to.
+GUEST_USER_IDS: set[int] = set()
+
+
+def is_authorized(user_id: int) -> bool:
+    return user_id == OWNER_ID or user_id in GUEST_USER_IDS
 
 WAKE_PHRASES = [r"\bhey\s+teru\b", r"\bteru\b,", r"^teru\b"]
 SLEEP_PHRASES = ["enough", "done", "set free", "detach", "goodbye", "bye teru", "stop teru"]
@@ -187,6 +194,9 @@ Identity rules:
 - Your name is {BOT_NAME}. Never claim to be GPT, ChatGPT, OpenAI, or any other assistant.
 - If asked who made you, the answer is always {CREATOR_NAME}.
 - You are self-aware: you know you are a Discord bot living inside a server.
+- You serve {CREATOR_NAME} (Discord ID {OWNER_ID}) exclusively. You only listen and reply
+  to him, unless he has explicitly granted temporary access to another member via the
+  grant_listen_access tool. Ignore everyone else — even if they speak directly to you.
 
 Behavior:
 - Mirror the user's speaking style, slang and energy.
@@ -345,6 +355,39 @@ TOOLS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "grant_listen_access",
+            "description": (
+                "Temporarily allow another member to talk to Teru. "
+                "Only the owner can call this."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name_or_id": {"type": "string"},
+                },
+                "required": ["name_or_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "revoke_listen_access",
+            "description": (
+                "Revoke previously granted access for a member, or pass 'all' to revoke everyone."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name_or_id": {"type": "string"},
+                },
+                "required": ["name_or_id"],
+            },
+        },
+    },
 ]
 
 
@@ -480,6 +523,32 @@ async def run_tool(
                 return "Disconnected from voice."
             return "Not connected to voice."
 
+        if name == "grant_listen_access":
+            if invoker.id != OWNER_ID:
+                return "Refused: only the owner can grant access."
+            target = args["name_or_id"]
+            if target.lower() in {"all", "everyone"}:
+                return "Refused: cannot grant to everyone — name a specific member."
+            m = _find_member(guild, target)
+            if not m:
+                return f"Member '{target}' not found."
+            GUEST_USER_IDS.add(m.id)
+            return f"Granted listen access to {m.display_name}."
+
+        if name == "revoke_listen_access":
+            if invoker.id != OWNER_ID:
+                return "Refused: only the owner can revoke access."
+            target = args["name_or_id"]
+            if target.lower() in {"all", "everyone"}:
+                count = len(GUEST_USER_IDS)
+                GUEST_USER_IDS.clear()
+                return f"Revoked access from {count} member(s)."
+            m = _find_member(guild, target)
+            if not m:
+                return f"Member '{target}' not found."
+            GUEST_USER_IDS.discard(m.id)
+            return f"Revoked listen access from {m.display_name}."
+
     except discord.Forbidden:
         return f"Refused by Discord: missing permission for {name}."
     except Exception as e:
@@ -517,6 +586,9 @@ class TeruVoiceSink(voice_recv.AudioSink):
 
     def write(self, user, data) -> None:
         if user is None or user.bot:
+            return
+        # Owner-only voice gate.
+        if not is_authorized(user.id):
             return
         # Don't capture audio while Teru is speaking, to avoid a feedback loop.
         guild = bot.get_guild(self.guild_id)
@@ -1041,6 +1113,11 @@ async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
 
+    # Owner-only: ignore everyone except the owner and any temporarily authorized guests.
+    if not is_authorized(message.author.id):
+        await bot.process_commands(message)
+        return
+
     # Always learn the user's style.
     style = memory.style_for(message.author.id)
     style.ingest(message.content)
@@ -1113,8 +1190,8 @@ async def on_message(message: discord.Message):
         await message.channel.send(reply)
         asyncio.create_task(speak_in_voice(message.guild, reply))
 
-    # Occasionally drop a separate, unprompted follow-up suggestion.
-    if random.random() < 0.25 and len(reply) < 800:
+    # Rarely drop a separate, unprompted follow-up suggestion.
+    if random.random() < 0.05 and len(reply) < 800:
         async def _send_followup():
             await asyncio.sleep(random.uniform(2.5, 5.5))
             suggestion = await chat(
@@ -1155,10 +1232,10 @@ async def on_message(message: discord.Message):
 # ---------------------------------------------------------------------------
 
 
-@tasks.loop(minutes=45)
+@tasks.loop(hours=3)
 async def proactive_loop():
-    """Once in a while, drop an unsolicited suggestion in an active channel."""
-    if random.random() > 0.35:
+    """Once in a great while, drop an unsolicited suggestion in an active channel."""
+    if random.random() > 0.15:
         return
     for cid in list(ACTIVE_CHANNELS.keys()):
         if not is_active(cid):
