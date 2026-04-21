@@ -375,6 +375,71 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "unban_user",
+            "description": "Unban a previously banned user by name or id.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name_or_id": {"type": "string"}},
+                "required": ["name_or_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_text_channel",
+            "description": "Delete a text channel by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_voice_channel",
+            "description": "Delete a voice channel by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_role",
+            "description": "Create a new role.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "color_hex": {"type": "string", "description": "Optional hex like 6E5BFF."},
+                    "hoist": {"type": "boolean", "description": "Display members separately."},
+                    "mentionable": {"type": "boolean"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_role",
+            "description": "Delete a role by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "revoke_listen_access",
             "description": (
                 "Revoke previously granted access for a member, or pass 'all' to revoke everyone."
@@ -407,6 +472,81 @@ def _find_member(guild: discord.Guild, name_or_id: str) -> discord.Member | None
     return None
 
 
+HARD_TOOLS = {
+    "ban_member",
+    "kick_member",
+    "unban_user",
+    "delete_text_channel",
+    "delete_voice_channel",
+    "delete_role",
+}
+
+
+def _summarize_action(name: str, args: dict) -> str:
+    if name == "ban_member":
+        return f"Ban {args.get('name_or_id')}"
+    if name == "kick_member":
+        return f"Kick {args.get('name_or_id')}"
+    if name == "unban_user":
+        return f"Unban {args.get('name_or_id')}"
+    if name == "delete_text_channel":
+        return f"Delete text channel #{args.get('name')}"
+    if name == "delete_voice_channel":
+        return f"Delete voice channel {args.get('name')}"
+    if name == "delete_role":
+        return f"Delete role {args.get('name')}"
+    return f"Run {name}"
+
+
+class ConfirmActionView(discord.ui.View):
+    """One-time confirmation view used for destructive tools."""
+
+    def __init__(self, owner_id: int, summary: str, executor):
+        super().__init__(timeout=60)
+        self.owner_id = owner_id
+        self.summary = summary
+        self.executor = executor
+        self.done = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                f"{ICONS['lock']} Only {CREATOR_NAME} can confirm.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def _disable(self, interaction: discord.Interaction):
+        for c in self.children:
+            c.disabled = True
+        try:
+            await interaction.message.edit(view=self)
+        except discord.HTTPException:
+            pass
+
+    @discord.ui.button(label="✓ Confirm", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if self.done:
+            return
+        self.done = True
+        await interaction.response.defer()
+        try:
+            result = await self.executor()
+        except Exception as e:
+            result = f"Failed: {e}"
+        await self._disable(interaction)
+        await interaction.followup.send(f"{ICONS['check']} {result}")
+
+    @discord.ui.button(label="✗ Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if self.done:
+            return
+        self.done = True
+        await interaction.response.defer()
+        await self._disable(interaction)
+        await interaction.followup.send(f"{ICONS['moon']} Cancelled.")
+
+
 async def run_tool(
     name: str,
     args: dict,
@@ -415,7 +555,38 @@ async def run_tool(
     invoker: discord.Member,
     channel: discord.abc.Messageable,
 ) -> str:
-    """Execute a tool requested by the model and return a short result string."""
+    """Decide whether to run immediately or post a confirmation view first."""
+    if name in HARD_TOOLS:
+        async def _do():
+            return await _execute_tool(
+                name, args, guild=guild, invoker=invoker, channel=channel
+            )
+        summary = _summarize_action(name, args)
+        view = ConfirmActionView(invoker.id, summary, _do)
+        embed = discord.Embed(
+            title=f"{ICONS['warn']} Confirm action",
+            description=f"**{summary}**\n\nThis is a destructive action — confirm to proceed.",
+            color=0xE53E3E,
+        )
+        try:
+            await channel.send(embed=embed, view=view)
+        except discord.HTTPException as e:
+            return f"Couldn't post confirmation: {e}"
+        return f"Awaiting confirmation in chat for: {summary}"
+    return await _execute_tool(
+        name, args, guild=guild, invoker=invoker, channel=channel
+    )
+
+
+async def _execute_tool(
+    name: str,
+    args: dict,
+    *,
+    guild: discord.Guild,
+    invoker: discord.Member,
+    channel: discord.abc.Messageable,
+) -> str:
+    """Actual tool executor. Bypasses the confirmation gate."""
     try:
         if name == "create_text_channel":
             cat = None
@@ -432,6 +603,61 @@ async def run_tool(
                 cat = discord.utils.get(guild.categories, name=args["category"])
             ch = await guild.create_voice_channel(name=args["name"], category=cat)
             return f"Created voice channel {ch.name} (id {ch.id})."
+
+        if name == "delete_text_channel":
+            target = discord.utils.get(guild.text_channels, name=args["name"].lstrip("#"))
+            if not target:
+                return f"Text channel #{args['name']} not found."
+            await target.delete(reason=f"By {invoker} via {BOT_NAME}")
+            return f"Deleted text channel #{target.name}."
+
+        if name == "delete_voice_channel":
+            target = discord.utils.get(guild.voice_channels, name=args["name"])
+            if not target:
+                return f"Voice channel {args['name']} not found."
+            await target.delete(reason=f"By {invoker} via {BOT_NAME}")
+            return f"Deleted voice channel {target.name}."
+
+        if name == "create_role":
+            kwargs = {"name": args["name"]}
+            if args.get("color_hex"):
+                try:
+                    kwargs["colour"] = discord.Colour(int(args["color_hex"].lstrip("#"), 16))
+                except ValueError:
+                    pass
+            if "hoist" in args:
+                kwargs["hoist"] = bool(args["hoist"])
+            if "mentionable" in args:
+                kwargs["mentionable"] = bool(args["mentionable"])
+            role = await guild.create_role(reason=f"By {invoker} via {BOT_NAME}", **kwargs)
+            return f"Created role {role.name} (id {role.id})."
+
+        if name == "delete_role":
+            role = discord.utils.find(
+                lambda r: r.name.lower() == args["name"].lower(), guild.roles
+            )
+            if not role:
+                return f"Role '{args['name']}' not found."
+            if role.is_default() or role.managed:
+                return f"Role {role.name} can't be deleted (default or managed)."
+            await role.delete(reason=f"By {invoker} via {BOT_NAME}")
+            return f"Deleted role {role.name}."
+
+        if name == "unban_user":
+            target = args["name_or_id"]
+            target_obj = None
+            async for entry in guild.bans():
+                if (
+                    str(entry.user.id) == target
+                    or entry.user.name.lower() == target.lower()
+                    or str(entry.user) == target
+                ):
+                    target_obj = entry.user
+                    break
+            if not target_obj:
+                return f"No ban found for '{target}'."
+            await guild.unban(target_obj, reason=f"By {invoker} via {BOT_NAME}")
+            return f"Unbanned {target_obj}."
 
         if name == "send_embed":
             target = channel
