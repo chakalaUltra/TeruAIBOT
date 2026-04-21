@@ -440,6 +440,24 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "ping_member",
+            "description": (
+                "Find a member by name/nickname and send a plain @mention message "
+                "in the channel (no embed). Optionally include a short note."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name_or_id": {"type": "string"},
+                    "note": {"type": "string", "description": "Optional text after the mention."},
+                },
+                "required": ["name_or_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "send_image",
             "description": (
                 "Search the internet for an image (or GIF) and post it in the channel. "
@@ -759,6 +777,18 @@ async def _execute_tool(
 
         if name == "web_lookup":
             return await web_search(args["query"])
+
+        if name == "ping_member":
+            m = _find_member(guild, args["name_or_id"])
+            if not m:
+                return f"Member '{args['name_or_id']}' not found."
+            note = (args.get("note") or "").strip()
+            content = f"{m.mention}" + (f" {note}" if note else "")
+            await channel.send(
+                content,
+                allowed_mentions=discord.AllowedMentions(users=[m]),
+            )
+            return f"Pinged {m.display_name}."
 
         if name == "send_image":
             kind = args.get("kind", "image")
