@@ -301,7 +301,7 @@ class SuggestionView(discord.ui.View):
         super().__init__(timeout=300)
         self.suggestion = suggestion
 
-    @discord.ui.button(label="Yes, do it", style=discord.ButtonStyle.success, emoji="✓")
+    @discord.ui.button(label="✓ Yes, do it", style=discord.ButtonStyle.success)
     async def accept(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.send_message(
             f"{ICONS['spark']} On it.", ephemeral=True
@@ -313,13 +313,13 @@ class SuggestionView(discord.ui.View):
             f"Yes — go ahead with: {self.suggestion}",
         )
 
-    @discord.ui.button(label="Not now", style=discord.ButtonStyle.secondary, emoji="✗")
+    @discord.ui.button(label="✗ Not now", style=discord.ButtonStyle.secondary)
     async def decline(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.send_message(
             f"{ICONS['moon']} Noted. I'll set it aside.", ephemeral=True
         )
 
-    @discord.ui.button(label="Tell me more", style=discord.ButtonStyle.primary, emoji="ℹ")
+    @discord.ui.button(label="ℹ Tell me more", style=discord.ButtonStyle.primary)
     async def more(self, interaction: discord.Interaction, _: discord.ui.Button):
         await interaction.response.defer(thinking=True, ephemeral=True)
         reply = await chat(
@@ -338,11 +338,11 @@ class ServerInsightsSelect(discord.ui.Select):
     def __init__(self, guild: discord.Guild):
         self.guild = guild
         options = [
-            discord.SelectOption(label="Members", value="members", emoji="●"),
-            discord.SelectOption(label="Roles", value="roles", emoji="◆"),
-            discord.SelectOption(label="Channels", value="channels", emoji="▣"),
-            discord.SelectOption(label="Boosts", value="boosts", emoji="✦"),
-            discord.SelectOption(label="Online Now", value="online", emoji="⚡"),
+            discord.SelectOption(label="● Members", value="members"),
+            discord.SelectOption(label="◆ Roles", value="roles"),
+            discord.SelectOption(label="▣ Channels", value="channels"),
+            discord.SelectOption(label="✦ Boosts", value="boosts"),
+            discord.SelectOption(label="⚡ Online Now", value="online"),
         ]
         super().__init__(placeholder="Pick an insight...", options=options)
 
