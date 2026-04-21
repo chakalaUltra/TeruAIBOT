@@ -14,12 +14,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import io
 import tempfile
+import wave
 
 import aiohttp
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands, tasks, voice_recv
 from openai import AsyncOpenAI
 
 # ---------------------------------------------------------------------------
@@ -461,16 +463,19 @@ async def run_tool(
         if name == "join_user_voice":
             if not invoker.voice or not invoker.voice.channel:
                 return f"{invoker.display_name} is not in a voice channel."
-            vc = guild.voice_client
-            if vc and vc.is_connected():
-                await vc.move_to(invoker.voice.channel)
-            else:
-                await invoker.voice.channel.connect(self_deaf=False)
-            return f"Joined voice channel {invoker.voice.channel.name}."
+            await join_and_listen(guild, invoker.voice.channel)
+            return (
+                f"Joined voice channel {invoker.voice.channel.name} and "
+                f"listening — speak to me freely."
+            )
 
         if name == "leave_voice":
             vc = guild.voice_client
             if vc and vc.is_connected():
+                try:
+                    vc.stop_listening()
+                except Exception:
+                    pass
                 await vc.disconnect(force=False)
                 return "Disconnected from voice."
             return "Not connected to voice."
@@ -485,6 +490,189 @@ async def run_tool(
 # ---------------------------------------------------------------------------
 # Voice / TTS
 # ---------------------------------------------------------------------------
+
+
+# Per-user PCM buffers + last activity timestamp.
+VOICE_BUFFERS: dict[int, bytearray] = {}
+VOICE_LAST_AT: dict[int, float] = {}
+VOICE_LOCK = asyncio.Lock()
+VOICE_PROCESSING: set[int] = set()
+SAMPLE_RATE = 48000
+SAMPLE_WIDTH = 2  # 16-bit
+CHANNELS = 2
+SILENCE_GAP = 0.9      # seconds of silence to end an utterance
+MIN_UTTER_BYTES = SAMPLE_RATE * SAMPLE_WIDTH * CHANNELS * 0.4  # ~0.4s minimum
+
+
+class TeruVoiceSink(voice_recv.AudioSink):
+    """Captures decoded PCM per user, hands it to the async flusher."""
+
+    def __init__(self, bot_loop: asyncio.AbstractEventLoop, guild_id: int) -> None:
+        super().__init__()
+        self.loop = bot_loop
+        self.guild_id = guild_id
+
+    def wants_opus(self) -> bool:
+        return False
+
+    def write(self, user, data) -> None:
+        if user is None or user.bot:
+            return
+        # Don't capture audio while Teru is speaking, to avoid a feedback loop.
+        guild = bot.get_guild(self.guild_id)
+        if guild and guild.voice_client and guild.voice_client.is_playing():
+            return
+        pcm = getattr(data, "pcm", None)
+        if not pcm:
+            return
+        buf = VOICE_BUFFERS.setdefault(user.id, bytearray())
+        buf.extend(pcm)
+        VOICE_LAST_AT[user.id] = asyncio.get_event_loop().time() if False else __import__("time").monotonic()
+
+    def cleanup(self) -> None:
+        VOICE_BUFFERS.clear()
+        VOICE_LAST_AT.clear()
+
+
+async def voice_flusher_loop():
+    """Watches for silence per user and triggers transcription + reply."""
+    import time
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        await asyncio.sleep(0.25)
+        now = time.monotonic()
+        candidates: list[int] = []
+        for uid, last in list(VOICE_LAST_AT.items()):
+            if uid in VOICE_PROCESSING:
+                continue
+            buf = VOICE_BUFFERS.get(uid)
+            if not buf or len(buf) < MIN_UTTER_BYTES:
+                continue
+            if now - last >= SILENCE_GAP:
+                candidates.append(uid)
+        for uid in candidates:
+            pcm = bytes(VOICE_BUFFERS.pop(uid, b""))
+            VOICE_LAST_AT.pop(uid, None)
+            if not pcm:
+                continue
+            VOICE_PROCESSING.add(uid)
+            asyncio.create_task(_handle_utterance(uid, pcm))
+
+
+async def _handle_utterance(user_id: int, pcm: bytes) -> None:
+    try:
+        # Find the user + their guild (where Teru is connected).
+        guild = None
+        member = None
+        for g in bot.guilds:
+            if g.voice_client and g.voice_client.is_connected():
+                m = g.get_member(user_id)
+                if m and m.voice and m.voice.channel == g.voice_client.channel:
+                    guild = g
+                    member = m
+                    break
+        if not guild or not member:
+            return
+
+        # Build WAV in memory.
+        wav_buf = io.BytesIO()
+        with wave.open(wav_buf, "wb") as w:
+            w.setnchannels(CHANNELS)
+            w.setsampwidth(SAMPLE_WIDTH)
+            w.setframerate(SAMPLE_RATE)
+            w.writeframes(pcm)
+        wav_bytes = wav_buf.getvalue()
+
+        # Transcribe.
+        try:
+            transcript = await ai.audio.transcriptions.create(
+                model="whisper-1",
+                file=("speech.wav", wav_bytes, "audio/wav"),
+            )
+            text = (transcript.text or "").strip()
+        except Exception as e:
+            print(f"[{BOT_NAME}] Whisper failed: {e}")
+            return
+
+        if not text or len(text) < 2:
+            return
+        # Filter out junk transcriptions (Whisper often hallucinates "Thanks for watching!" on silence).
+        junk = {"thanks for watching!", "thank you.", "you", ".", "thanks for watching"}
+        if text.lower().strip(" .!,?") in {j.strip(" .!,?") for j in junk}:
+            return
+
+        print(f"[{BOT_NAME}] Heard {member.display_name}: {text}")
+
+        # Choose a text channel to mirror the conversation in.
+        text_channel = None
+        for ch in guild.text_channels:
+            if ch.permissions_for(guild.me).send_messages:
+                text_channel = ch
+                break
+
+        # Treat this like a normal message + run tools loop.
+        cid = (text_channel.id if text_channel else guild.voice_client.channel.id)
+        push_history(cid, "user", f"{member.display_name} (voice): {text}")
+        style = memory.style_for(member.id)
+        style.ingest(text)
+
+        msgs = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": (
+                    f"This message was spoken aloud in voice channel "
+                    f"{guild.voice_client.channel.name}. Reply concisely (1-2 "
+                    "sentences) since it'll be spoken aloud. Speaker style: "
+                    f"{style.summary()}"
+                ),
+            },
+            *HISTORY[cid][-10:],
+        ]
+
+        reply = await chat_with_tools(
+            msgs,
+            guild=guild,
+            invoker=member,
+            channel=text_channel or guild.voice_client.channel,
+        )
+        push_history(cid, "assistant", reply)
+
+        if reply:
+            if text_channel:
+                try:
+                    await text_channel.send(
+                        f"{ICONS['music']} **{member.display_name}** said: _{text}_\n"
+                        f"{ICONS['arrow']} {reply}"
+                    )
+                except discord.HTTPException:
+                    pass
+            await speak_in_voice(guild, reply)
+    finally:
+        VOICE_PROCESSING.discard(user_id)
+
+
+async def join_and_listen(guild: discord.Guild, channel: discord.VoiceChannel) -> None:
+    """Connect to the VC (or move) using the receive-capable client and start listening."""
+    vc = guild.voice_client
+    if vc and vc.is_connected():
+        try:
+            vc.stop_listening()
+        except Exception:
+            pass
+        if vc.channel != channel:
+            await vc.move_to(channel)
+        # Reconnect with recv client if we don't have one.
+        if not isinstance(vc, voice_recv.VoiceRecvClient):
+            await vc.disconnect(force=False)
+            vc = await channel.connect(cls=voice_recv.VoiceRecvClient, self_deaf=False)
+    else:
+        vc = await channel.connect(cls=voice_recv.VoiceRecvClient, self_deaf=False)
+    sink = TeruVoiceSink(bot.loop, guild.id)
+    try:
+        vc.listen(sink)
+    except Exception as e:
+        print(f"[{BOT_NAME}] listen() failed: {e}")
 
 
 async def speak_in_voice(guild: discord.Guild, text: str) -> None:
@@ -845,6 +1033,7 @@ async def on_ready():
     )
     if not proactive_loop.is_running():
         proactive_loop.start()
+    asyncio.create_task(voice_flusher_loop())
 
 
 @bot.event
@@ -1241,53 +1430,6 @@ async def recall_cmd(interaction: discord.Interaction, key: str):
         await interaction.response.send_message(
             f"{ICONS['cross']} Nothing stored under `{key}`.", ephemeral=True
         )
-
-
-@bot.tree.command(name="join", description="Have Teru join your current voice channel.")
-async def join_cmd(interaction: discord.Interaction):
-    if not interaction.user.voice or not interaction.user.voice.channel:
-        return await interaction.response.send_message(
-            f"{ICONS['cross']} You need to be in a voice channel first.", ephemeral=True
-        )
-    target = interaction.user.voice.channel
-    vc = interaction.guild.voice_client
-    try:
-        if vc and vc.is_connected():
-            await vc.move_to(target)
-        else:
-            await target.connect(self_deaf=False)
-    except Exception as e:
-        return await interaction.response.send_message(
-            f"{ICONS['warn']} Couldn't join: `{e}`", ephemeral=True
-        )
-    await interaction.response.send_message(
-        f"{ICONS['bolt']} Joined **{target.name}**. I'll speak my replies here."
-    )
-
-
-@bot.tree.command(name="leave", description="Have Teru leave the voice channel.")
-async def leave_cmd(interaction: discord.Interaction):
-    vc = interaction.guild.voice_client
-    if vc and vc.is_connected():
-        await vc.disconnect(force=False)
-        await interaction.response.send_message(f"{ICONS['moon']} Left voice.")
-    else:
-        await interaction.response.send_message(
-            f"{ICONS['cross']} I'm not in a voice channel.", ephemeral=True
-        )
-
-
-@bot.tree.command(name="say", description="Speak something out loud in the voice channel.")
-@app_commands.describe(text="What Teru should say")
-async def say_cmd(interaction: discord.Interaction, text: str):
-    vc = interaction.guild.voice_client
-    if not vc or not vc.is_connected():
-        return await interaction.response.send_message(
-            f"{ICONS['cross']} I'm not in a voice channel. Use /join first.",
-            ephemeral=True,
-        )
-    await interaction.response.send_message(f"{ICONS['music']} Speaking…", ephemeral=True)
-    await speak_in_voice(interaction.guild, text)
 
 
 @bot.tree.command(name="about", description="Who is Teru?")
