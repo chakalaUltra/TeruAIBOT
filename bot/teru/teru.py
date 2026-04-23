@@ -440,6 +440,172 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "read_channel_history",
+            "description": (
+                "Read recent messages from a channel and return a compact summary "
+                "(author, time, content). Use to recall what was said earlier."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "channel": {"type": "string", "description": "Channel name. Omit for current channel."},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "How many messages back (default 25)."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "view_audit_log",
+            "description": (
+                "View recent server audit-log entries (joins, role changes, bans, "
+                "channel edits, etc.). Returns a compact summary."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_text_channel",
+            "description": "Rename or update a text channel's topic/slowmode.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "new_name": {"type": "string"},
+                    "new_topic": {"type": "string"},
+                    "slowmode_seconds": {"type": "integer", "minimum": 0, "maximum": 21600},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_voice_channel",
+            "description": "Rename a voice channel or change its user limit.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "new_name": {"type": "string"},
+                    "user_limit": {"type": "integer", "minimum": 0, "maximum": 99},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_role",
+            "description": "Update a role's name, color, hoist or mentionable flag.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "new_name": {"type": "string"},
+                    "color_hex": {"type": "string"},
+                    "hoist": {"type": "boolean"},
+                    "mentionable": {"type": "boolean"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_role_to_member",
+            "description": "Give a role to a member.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member": {"type": "string"},
+                    "role": {"type": "string"},
+                },
+                "required": ["member", "role"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_role_from_member",
+            "description": "Remove a role from a member.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member": {"type": "string"},
+                    "role": {"type": "string"},
+                },
+                "required": ["member", "role"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_member",
+            "description": "Change a member's server nickname.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name_or_id": {"type": "string"},
+                    "nickname": {"type": "string", "description": "Empty string to clear."},
+                },
+                "required": ["name_or_id", "nickname"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_poll",
+            "description": "Create a native Discord poll in the channel.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "maxItems": 10,
+                    },
+                    "duration_hours": {"type": "integer", "minimum": 1, "maximum": 168},
+                    "multiselect": {"type": "boolean"},
+                },
+                "required": ["question", "options"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_youtube",
+            "description": "Search YouTube and post the top video link in chat (auto-embeds).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "count": {"type": "integer", "minimum": 1, "maximum": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ping_member",
             "description": (
                 "Find a member by name/nickname and send a plain @mention message "
@@ -796,15 +962,153 @@ async def _execute_tool(
             urls = await search_media(args["query"], kind=kind, count=count)
             if not urls:
                 return f"Couldn't find any {kind}s for '{args['query']}'."
-            await channel.send("\n".join(urls))
-            return f"Posted {len(urls)} {kind}(s) for '{args['query']}'."
+            files: list[discord.File] = []
+            for u in urls:
+                f = await fetch_as_attachment(u)
+                if f:
+                    files.append(f)
+            if files:
+                await channel.send(files=files)
+            else:
+                await channel.send("\n".join(urls))
+            return f"Posted {len(files) or len(urls)} {kind}(s) for '{args['query']}'."
 
         if name == "send_video":
             urls = await search_media(args["query"], kind="video", count=1)
             if not urls:
                 return f"Couldn't find a clip for '{args['query']}'."
-            await channel.send(urls[0])
+            f = await fetch_as_attachment(urls[0], max_bytes=8_000_000)
+            if f:
+                await channel.send(file=f)
+            else:
+                await channel.send(urls[0])
             return f"Posted a clip for '{args['query']}'."
+
+        if name == "search_youtube":
+            count = max(1, min(int(args.get("count", 1)), 5))
+            links = await search_youtube(args["query"], count=count)
+            if not links:
+                return f"No YouTube results for '{args['query']}'."
+            await channel.send("\n".join(links))
+            return f"Posted {len(links)} YouTube result(s) for '{args['query']}'."
+
+        if name == "read_channel_history":
+            target = channel
+            if args.get("channel"):
+                found = discord.utils.get(
+                    guild.text_channels, name=args["channel"].lstrip("#")
+                )
+                if not found:
+                    return f"Channel #{args['channel']} not found."
+                target = found
+            limit = max(1, min(int(args.get("limit", 25)), 100))
+            lines: list[str] = []
+            async for m in target.history(limit=limit):
+                ts = m.created_at.strftime("%m-%d %H:%M")
+                content = (m.content or "").replace("\n", " ").strip()
+                if not content and m.attachments:
+                    content = f"[{len(m.attachments)} attachment(s)]"
+                lines.append(f"[{ts}] {m.author.display_name}: {content[:200]}")
+            lines.reverse()
+            return "Recent messages:\n" + "\n".join(lines) if lines else "No messages."
+
+        if name == "view_audit_log":
+            limit = max(1, min(int(args.get("limit", 15)), 50))
+            try:
+                entries = []
+                async for e in guild.audit_logs(limit=limit):
+                    ts = e.created_at.strftime("%m-%d %H:%M")
+                    actor = e.user.display_name if e.user else "?"
+                    target_name = getattr(e.target, "name", None) or str(e.target)
+                    entries.append(f"[{ts}] {actor} → {e.action.name} → {target_name}")
+                return "Audit log:\n" + ("\n".join(entries) if entries else "(empty)")
+            except discord.Forbidden:
+                return "I don't have View Audit Log permission."
+
+        if name == "edit_text_channel":
+            ch = discord.utils.get(guild.text_channels, name=args["name"].lstrip("#"))
+            if not ch:
+                return f"Text channel #{args['name']} not found."
+            kwargs = {}
+            if args.get("new_name"):
+                kwargs["name"] = args["new_name"]
+            if "new_topic" in args:
+                kwargs["topic"] = args["new_topic"]
+            if "slowmode_seconds" in args:
+                kwargs["slowmode_delay"] = int(args["slowmode_seconds"])
+            await ch.edit(reason=f"By {invoker} via {BOT_NAME}", **kwargs)
+            return f"Updated #{ch.name}."
+
+        if name == "edit_voice_channel":
+            ch = discord.utils.get(guild.voice_channels, name=args["name"])
+            if not ch:
+                return f"Voice channel {args['name']} not found."
+            kwargs = {}
+            if args.get("new_name"):
+                kwargs["name"] = args["new_name"]
+            if "user_limit" in args:
+                kwargs["user_limit"] = int(args["user_limit"])
+            await ch.edit(reason=f"By {invoker} via {BOT_NAME}", **kwargs)
+            return f"Updated voice channel {ch.name}."
+
+        if name == "edit_role":
+            role = discord.utils.find(
+                lambda r: r.name.lower() == args["name"].lower(), guild.roles
+            )
+            if not role:
+                return f"Role '{args['name']}' not found."
+            kwargs = {}
+            if args.get("new_name"):
+                kwargs["name"] = args["new_name"]
+            if args.get("color_hex"):
+                try:
+                    kwargs["colour"] = discord.Colour(int(args["color_hex"].lstrip("#"), 16))
+                except ValueError:
+                    pass
+            if "hoist" in args:
+                kwargs["hoist"] = bool(args["hoist"])
+            if "mentionable" in args:
+                kwargs["mentionable"] = bool(args["mentionable"])
+            await role.edit(reason=f"By {invoker} via {BOT_NAME}", **kwargs)
+            return f"Updated role {role.name}."
+
+        if name in ("add_role_to_member", "remove_role_from_member"):
+            m = _find_member(guild, args["member"])
+            if not m:
+                return f"Member '{args['member']}' not found."
+            role = discord.utils.find(
+                lambda r: r.name.lower() == args["role"].lower(), guild.roles
+            )
+            if not role:
+                return f"Role '{args['role']}' not found."
+            if name == "add_role_to_member":
+                await m.add_roles(role, reason=f"By {invoker} via {BOT_NAME}")
+                return f"Added role {role.name} to {m.display_name}."
+            await m.remove_roles(role, reason=f"By {invoker} via {BOT_NAME}")
+            return f"Removed role {role.name} from {m.display_name}."
+
+        if name == "edit_member":
+            m = _find_member(guild, args["name_or_id"])
+            if not m:
+                return f"Member '{args['name_or_id']}' not found."
+            new_nick = args["nickname"] or None
+            await m.edit(nick=new_nick, reason=f"By {invoker} via {BOT_NAME}")
+            return f"Set {m.name}'s nickname to {new_nick or '(cleared)'}."
+
+        if name == "create_poll":
+            opts = [str(o)[:55] for o in args["options"][:10]]
+            if len(opts) < 2:
+                return "Need at least 2 options."
+            hours = max(1, min(int(args.get("duration_hours", 24)), 168))
+            poll = discord.Poll(
+                question=args["question"][:300],
+                duration=timedelta(hours=hours),
+                multiple=bool(args.get("multiselect", False)),
+            )
+            for o in opts:
+                poll.add_answer(text=o)
+            await channel.send(poll=poll)
+            return f"Posted poll: {args['question']}"
 
         if name == "join_user_voice":
             if not invoker.voice or not invoker.voice.channel:
@@ -1234,6 +1538,59 @@ async def search_media(query: str, kind: str = "image", count: int = 1) -> list[
             return urls
     except Exception:
         return []
+
+
+async def search_youtube(query: str, count: int = 1) -> list[str]:
+    """Scrape YouTube search and return up to `count` https://youtu.be/<id> links."""
+    headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9"}
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(
+                "https://www.youtube.com/results",
+                params={"search_query": query},
+                timeout=15,
+            ) as r:
+                html = await r.text()
+        ids: list[str] = []
+        seen: set[str] = set()
+        for m in re.finditer(r'"videoId":"([\w-]{11})"', html):
+            vid = m.group(1)
+            if vid in seen:
+                continue
+            seen.add(vid)
+            ids.append(f"https://youtu.be/{vid}")
+            if len(ids) >= count:
+                break
+        return ids
+    except Exception:
+        return []
+
+
+async def fetch_as_attachment(url: str, max_bytes: int = 8_000_000) -> discord.File | None:
+    """Download a media URL and wrap it as a discord.File. Returns None on failure/oversize."""
+    try:
+        async with aiohttp.ClientSession(
+            headers={"User-Agent": "Mozilla/5.0"}
+        ) as session:
+            async with session.get(url, timeout=20) as r:
+                if r.status != 200:
+                    return None
+                ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip()
+                clen = int(r.headers.get("Content-Length") or 0)
+                if clen and clen > max_bytes:
+                    return None
+                data = await r.read()
+        if len(data) > max_bytes:
+            return None
+        ext_map = {
+            "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png",
+            "image/webp": "webp", "image/gif": "gif",
+            "video/mp4": "mp4", "video/webm": "webm",
+        }
+        ext = ext_map.get(ctype) or url.split("?")[0].rsplit(".", 1)[-1][:4] or "bin"
+        return discord.File(io.BytesIO(data), filename=f"teru.{ext}")
+    except Exception:
+        return None
 
 
 async def web_search(query: str) -> str:
