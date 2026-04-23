@@ -1481,6 +1481,7 @@ async def on_ready():
     )
     if not proactive_loop.is_running():
         proactive_loop.start()
+    await start_keepalive_web()
     asyncio.create_task(voice_flusher_loop())
 
 
@@ -1957,6 +1958,37 @@ async def about_cmd(interaction: discord.Interaction):
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
+
+
+async def start_keepalive_web() -> None:
+    """Tiny HTTP server so uptime pingers (UptimeRobot, etc.) can keep the bot alive."""
+    from aiohttp import web
+
+    async def root(_):
+        return web.json_response({
+            "name": BOT_NAME,
+            "status": "online",
+            "guilds": len(bot.guilds),
+            "user": str(bot.user) if bot.user else None,
+        })
+
+    async def health(_):
+        return web.Response(text="ok")
+
+    app = web.Application()
+    app.router.add_get("/", root)
+    app.router.add_get("/health", health)
+    app.router.add_get("/ping", health)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", "8000"))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    try:
+        await site.start()
+        print(f"[{BOT_NAME}] Keep-alive web listening on :{port}")
+    except OSError as e:
+        print(f"[{BOT_NAME}] Keep-alive web failed to start: {e}")
 
 
 def main() -> None:
