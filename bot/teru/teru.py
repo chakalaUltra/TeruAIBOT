@@ -1693,70 +1693,6 @@ def matches_sleep(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-class SuggestionView(discord.ui.View):
-    """Quick action buttons Teru attaches to suggestions."""
-
-    def __init__(self, suggestion: str):
-        super().__init__(timeout=300)
-        self.suggestion = suggestion
-
-    @discord.ui.button(label="✓ Yes, do it", style=discord.ButtonStyle.success)
-    async def accept(self, interaction: discord.Interaction, _: discord.ui.Button):
-        await interaction.response.defer()
-        activate(interaction.channel_id)
-        msgs = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"{interaction.user.display_name} confirmed your suggestion. "
-                    f"Carry it out NOW using your tools. The suggestion was: "
-                    f"\"{self.suggestion}\". After acting, give a short confirmation."
-                ),
-            },
-        ]
-        try:
-            reply = await chat_with_tools(
-                msgs,
-                guild=interaction.guild,
-                invoker=interaction.user,
-                channel=interaction.channel,
-            )
-        except Exception as e:
-            reply = f"{ICONS['warn']} I tried, but something blocked me: `{e}`"
-        push_history(interaction.channel_id, "assistant", reply)
-        await interaction.followup.send(reply or f"{ICONS['check']} Done.")
-        if interaction.guild:
-            asyncio.create_task(speak_in_voice(interaction.guild, reply))
-        # Disable buttons after action.
-        for child in self.children:
-            child.disabled = True
-        try:
-            await interaction.message.edit(view=self)
-        except discord.HTTPException:
-            pass
-
-    @discord.ui.button(label="✗ Not now", style=discord.ButtonStyle.secondary)
-    async def decline(self, interaction: discord.Interaction, _: discord.ui.Button):
-        await interaction.response.send_message(
-            f"{ICONS['moon']} Noted. I'll set it aside.", ephemeral=True
-        )
-
-    @discord.ui.button(label="ℹ Tell me more", style=discord.ButtonStyle.primary)
-    async def more(self, interaction: discord.Interaction, _: discord.ui.Button):
-        await interaction.response.defer(thinking=True, ephemeral=True)
-        reply = await chat(
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": f"Expand on this suggestion in 2-3 sentences: {self.suggestion}",
-                },
-            ]
-        )
-        await interaction.followup.send(reply, ephemeral=True)
-
-
 class ServerInsightsSelect(discord.ui.Select):
     def __init__(self, guild: discord.Guild):
         self.guild = guild
@@ -1836,8 +1772,6 @@ async def on_ready():
             name=f"over {CREATOR_NAME}'s server",
         )
     )
-    if not proactive_loop.is_running():
-        proactive_loop.start()
     await start_keepalive_web()
     asyncio.create_task(voice_flusher_loop())
 
@@ -1976,84 +1910,7 @@ async def on_message(message: discord.Message):
         LAST_REPLY_AT[cid] = datetime.now(timezone.utc)
         asyncio.create_task(speak_in_voice(message.guild, reply))
 
-    # Rarely drop a separate, unprompted follow-up suggestion.
-    if random.random() < 0.05 and len(reply) < 800:
-        async def _send_followup():
-            await asyncio.sleep(random.uniform(2.5, 5.5))
-            suggestion = await chat(
-                [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Generate ONE unprompted follow-up thought for "
-                            f"{message.author.display_name} — something a "
-                            "thoughtful AI assistant would mention out of the "
-                            "blue (a trending song, a news headline, a server "
-                            "tip, a question about their day, a recommendation). "
-                            "It should NOT be tied to what was just discussed. "
-                            "Under 22 words. Just the thought, no preamble."
-                        ),
-                    },
-                ],
-                max_tokens=100,
-            )
-            embed = discord.Embed(
-                title=f"{ICONS['spark']} While you're here…",
-                description=suggestion,
-                color=ACCENT_COLOR,
-            )
-            try:
-                await message.channel.send(embed=embed, view=SuggestionView(suggestion))
-            except discord.HTTPException:
-                pass
-
-        asyncio.create_task(_send_followup())
-
     await bot.process_commands(message)
-
-
-# ---------------------------------------------------------------------------
-# Proactive loop — Teru speaks up on his own occasionally
-# ---------------------------------------------------------------------------
-
-
-@tasks.loop(hours=3)
-async def proactive_loop():
-    """Once in a great while, drop an unsolicited suggestion in an active channel."""
-    if random.random() > 0.15:
-        return
-    for cid in list(ACTIVE_CHANNELS.keys()):
-        if not is_active(cid):
-            continue
-        channel = bot.get_channel(cid)
-        if not isinstance(channel, discord.TextChannel):
-            continue
-        idea = await chat(
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        "Generate ONE proactive, friendly check-in or suggestion "
-                        f"for {CREATOR_NAME} — something a thoughtful AI assistant "
-                        "would mention unprompted (e.g. trending Spotify songs, a "
-                        "news headline, a server tip, a question about their day). "
-                        "Under 25 words."
-                    ),
-                },
-            ],
-            max_tokens=120,
-        )
-        embed = discord.Embed(
-            title=f"{ICONS['spark']} A thought from Teru",
-            description=idea,
-            color=ACCENT_COLOR,
-        )
-        try:
-            await channel.send(embed=embed, view=SuggestionView(idea))
-        except discord.Forbidden:
-            pass
 
 
 # ---------------------------------------------------------------------------
