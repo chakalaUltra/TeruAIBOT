@@ -73,7 +73,7 @@ ICONS = {
     "shield": "⛨",
 }
 
-ACCENT_COLOR = 0x6E5BFF  # Soft violet — Teru's signature.
+ACCENT_COLOR = 0xFFFFFF
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 MEMORY_FILE = DATA_DIR / "memory.json"
@@ -781,7 +781,7 @@ async def run_tool(
         embed = discord.Embed(
             title=f"{ICONS['warn']} Confirm action",
             description=f"**{summary}**\n\nThis is a destructive action — confirm to proceed.",
-            color=0xE53E3E,
+            color=0xFFFFFF,
         )
         try:
             await channel.send(embed=embed, view=view)
@@ -2081,7 +2081,7 @@ async def kick_cmd(
         embed = discord.Embed(
             title=f"{ICONS['flag']} Member kicked",
             description=f"**{member}** was kicked.\nReason: {reason}",
-            color=0xFF7A59,
+            color=0xFFFFFF,
         )
         await interaction.response.send_message(embed=embed)
     except discord.Forbidden:
@@ -2107,7 +2107,7 @@ async def ban_cmd(
         embed = discord.Embed(
             title=f"{ICONS['shield']} Member banned",
             description=f"**{member}** was banned.\nReason: {reason}",
-            color=0xE53E3E,
+            color=0xFFFFFF,
         )
         await interaction.response.send_message(embed=embed)
     except discord.Forbidden:
