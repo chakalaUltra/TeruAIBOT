@@ -1105,7 +1105,12 @@ async def _execute_tool(
             )
             for o in opts:
                 poll.add_answer(text=o)
-            await channel.send(poll=poll)
+            try:
+                await channel.send(poll=poll)
+            except discord.Forbidden:
+                return "I don't have the Send Polls permission in this channel. Grant it in Server Settings → Roles."
+            except discord.HTTPException as e:
+                return f"Poll failed: {e.text or e}"
             return f"Posted poll: {args['question']}"
 
         if name == "join_user_voice":
@@ -1629,6 +1634,7 @@ intents.message_content = True
 intents.members = True
 intents.guilds = True
 intents.presences = True
+intents.polls = True
 
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
