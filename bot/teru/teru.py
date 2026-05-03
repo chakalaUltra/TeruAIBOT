@@ -891,8 +891,14 @@ async def _run_tools_for_turn(
     guild: discord.Guild,
     invoker: discord.Member,
     channel: discord.abc.Messageable,
+    hard_accumulator: list | None = None,
 ) -> dict[str, str]:
-    """Execute all tool calls for one model turn. Batches hard-tool confirmations into ONE embed."""
+    """Execute all tool calls for one model turn.
+
+    Soft tools run immediately. Hard tools are either sent to a per-turn
+    BatchConfirmView (hard_accumulator=None) or appended to hard_accumulator
+    so the caller can flush ONE combined embed after all turns finish.
+    """
     results: dict[str, str] = {}
     parsed: list = []
     for tc in tool_calls:
@@ -912,29 +918,62 @@ async def _run_tools_for_turn(
             r = f"Tool error: {e}"
         results[tc.id] = str(r)
 
-    if hard:
-        executors: list = []
-        for tc, args in hard:
-            summary = _summarize_action(tc.function.name, args)
-            async def _exec(n=tc.function.name, a=args):
-                return await _execute_tool(n, a, guild=guild, invoker=invoker, channel=channel)
-            executors.append((summary, _exec))
-            results[tc.id] = f"Pending confirmation: {summary}"
-
-        count = len(hard)
-        desc = "\n".join(f"▣ {s}" for s, _ in executors)
-        view = BatchConfirmView(invoker.id, executors)
-        embed = discord.Embed(
-            title=f"{ICONS['warn']} Confirm {count} action{'s' if count > 1 else ''}",
-            description=f"{desc}\n\nConfirm to proceed with all of the above.",
-            color=0xFFFFFF,
-        )
-        try:
-            await channel.send(embed=embed, view=view)
-        except discord.HTTPException:
-            pass
+    for tc, args in hard:
+        summary = _summarize_action(tc.function.name, args)
+        async def _exec(n=tc.function.name, a=args):
+            return await _execute_tool(n, a, guild=guild, invoker=invoker, channel=channel)
+        results[tc.id] = f"Queued for confirmation: {summary}"
+        if hard_accumulator is not None:
+            hard_accumulator.append((summary, _exec))
+        else:
+            # Legacy single-turn path (not used by chat_with_tools anymore).
+            executors = [(summary, _exec)]
+            view = BatchConfirmView(invoker.id, executors)
+            embed = discord.Embed(
+                title=f"{ICONS['warn']} Confirm action",
+                description=f"▣ {summary}\n\nConfirm to proceed.",
+                color=0xFFFFFF,
+            )
+            try:
+                await channel.send(embed=embed, view=view)
+            except discord.HTTPException:
+                pass
 
     return results
+
+
+async def _flush_hard_confirm(
+    hard_executors: list,
+    *,
+    invoker: discord.Member,
+    channel: discord.abc.Messageable,
+) -> None:
+    """Send ONE BatchConfirmView embed covering every accumulated hard action."""
+    if not hard_executors:
+        return
+    count = len(hard_executors)
+    lines = [f"▣ {s}" for s, _ in hard_executors]
+    # Keep description under Discord's 4096-char embed limit.
+    desc_lines: list[str] = []
+    total = 0
+    for line in lines:
+        if total + len(line) + 1 > 3800:
+            remaining = count - len(desc_lines)
+            desc_lines.append(f"▣ … and {remaining} more action(s)")
+            break
+        desc_lines.append(line)
+        total += len(line) + 1
+    desc = "\n".join(desc_lines) + "\n\nConfirm to proceed with all of the above."
+    view = BatchConfirmView(invoker.id, hard_executors)
+    embed = discord.Embed(
+        title=f"{ICONS['warn']} Confirm {count} action{'s' if count > 1 else ''}",
+        description=desc,
+        color=0xFFFFFF,
+    )
+    try:
+        await channel.send(embed=embed, view=view)
+    except discord.HTTPException:
+        pass
 
 
 async def _execute_tool(
@@ -1739,6 +1778,8 @@ async def chat_with_tools(
     convo = list(messages)
     last_text = ""
     did_tools = False
+    # Accumulate ALL hard tools across every turn so we send exactly ONE embed.
+    all_hard: list = []
 
     for _ in range(max_iters):
         try:
@@ -1750,6 +1791,7 @@ async def chat_with_tools(
                 max_completion_tokens=700,
             )
         except Exception as e:
+            await _flush_hard_confirm(all_hard, invoker=invoker, channel=channel)
             return f"{ICONS['warn']} Brain error: `{e}`"
 
         msg = resp.choices[0].message
@@ -1758,7 +1800,7 @@ async def chat_with_tools(
         if not tool_calls:
             # Model returned text — it considers itself done.
             last_text = (msg.content or "").strip()
-            return last_text
+            break
 
         did_tools = True
 
@@ -1781,7 +1823,11 @@ async def chat_with_tools(
             }
         )
         turn_results = await _run_tools_for_turn(
-            tool_calls, guild=guild, invoker=invoker, channel=channel
+            tool_calls,
+            guild=guild,
+            invoker=invoker,
+            channel=channel,
+            hard_accumulator=all_hard,
         )
         for tc in tool_calls:
             convo.append(
@@ -1796,6 +1842,8 @@ async def chat_with_tools(
         # multi-step lists without waiting for the user to prod it.
         convo.append({"role": "user", "content": _CONTINUE_PROMPT})
 
+    # Send ONE combined confirm embed for every hard action collected across all turns.
+    await _flush_hard_confirm(all_hard, invoker=invoker, channel=channel)
     return last_text or ("Done." if did_tools else "")
 
 
