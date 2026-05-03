@@ -4,7 +4,7 @@ This monorepo hosts a Discord bot called **Teru** (creator: **Chakala**), a JARV
 
 ## Architecture
 
-- `bot/teru/teru.py` — Main bot. discord.py + OpenAI (via Replit AI Integrations). Self-aware, learns user style, proactive, supports embeds/buttons/dropdowns, moderation, server insights, web search.
+- `bot/teru/teru.py` — Main bot. discord.py + OpenAI (via Replit AI Integrations). Self-aware, learns user style, proactive, supports embeds/buttons/dropdowns, moderation, server insights, web search, mini-games, batch confirmations.
 - `bot/teru/data/` — Persistent memory (`memory.json` for facts, `style.json` for per-user speaking style).
 - `artifacts/api-server/` — Default Fastify API server (unused by Teru).
 - `artifacts/mockup-sandbox/` — Default canvas preview (unused by Teru).

@@ -438,6 +438,73 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "reorder_channel",
+            "description": "Move a text or voice channel to a new position (0 = top). Accepts name or ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name_or_id": {"type": "string"},
+                    "position": {"type": "integer", "minimum": 0},
+                },
+                "required": ["name_or_id", "position"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reorder_role",
+            "description": "Move a role to a new position (1 = bottom, higher = more powerful). Accepts name or ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name_or_id": {"type": "string"},
+                    "position": {"type": "integer", "minimum": 1},
+                },
+                "required": ["name_or_id", "position"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "broadcast_ping",
+            "description": "Send @here, @everyone, or mention a role by name/ID. Requires invoker to have mention_everyone permission.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "'here', 'everyone', or a role name/ID."},
+                    "note": {"type": "string", "description": "Optional message after the mention."},
+                },
+                "required": ["target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_minigame",
+            "description": (
+                "Run an interactive mini-game in the channel. "
+                "game_type: trivia | number_guess | word_scramble | custom. "
+                "For trivia: config={questions:[{question,answer}], time_limit_seconds}. "
+                "For number_guess: config={min,max,max_guesses}. "
+                "For word_scramble: config={words:[...], time_limit_seconds}. "
+                "For custom: config={title, description}."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "game_type": {"type": "string", "enum": ["trivia", "number_guess", "word_scramble", "custom"]},
+                    "config": {"type": "object"},
+                },
+                "required": ["game_type", "config"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_channel_history",
             "description": (
                 "Read recent messages from a channel and return a compact summary "
@@ -669,6 +736,37 @@ TOOLS = [
 ]
 
 
+def _find_channel(
+    guild: discord.Guild, name_or_id: str, kind: str = "any"
+) -> discord.abc.GuildChannel | None:
+    """Find a channel by ID or name. kind: text | voice | any."""
+    try:
+        ch = guild.get_channel(int(name_or_id))
+        if ch:
+            return ch
+    except (ValueError, TypeError):
+        pass
+    name = str(name_or_id).lstrip("#")
+    if kind == "text":
+        return discord.utils.get(guild.text_channels, name=name)
+    if kind == "voice":
+        return discord.utils.get(guild.voice_channels, name=name)
+    return discord.utils.get(guild.channels, name=name)
+
+
+def _find_role(guild: discord.Guild, name_or_id: str) -> discord.Role | None:
+    """Find a role by ID or name."""
+    try:
+        role = guild.get_role(int(name_or_id))
+        if role:
+            return role
+    except (ValueError, TypeError):
+        pass
+    return discord.utils.find(
+        lambda r: r.name.lower() == str(name_or_id).lower(), guild.roles
+    )
+
+
 def _find_member(guild: discord.Guild, name_or_id: str) -> discord.Member | None:
     raw = name_or_id.strip().lstrip("@").strip("<>").lstrip("!")
     if raw.isdigit():
@@ -694,31 +792,49 @@ HARD_TOOLS = {
     "delete_role",
 }
 
+TOOL_PERMS: dict[str, str] = {
+    "kick_member": "kick_members",
+    "ban_member": "ban_members",
+    "unban_user": "ban_members",
+    "mute_member": "moderate_members",
+    "delete_text_channel": "manage_channels",
+    "delete_voice_channel": "manage_channels",
+    "create_text_channel": "manage_channels",
+    "create_voice_channel": "manage_channels",
+    "edit_text_channel": "manage_channels",
+    "edit_voice_channel": "manage_channels",
+    "reorder_channel": "manage_channels",
+    "create_role": "manage_roles",
+    "delete_role": "manage_roles",
+    "edit_role": "manage_roles",
+    "reorder_role": "manage_roles",
+    "add_role_to_member": "manage_roles",
+    "remove_role_from_member": "manage_roles",
+    "edit_member": "manage_nicknames",
+    "broadcast_ping": "mention_everyone",
+}
+
 
 def _summarize_action(name: str, args: dict) -> str:
-    if name == "ban_member":
-        return f"Ban {args.get('name_or_id')}"
-    if name == "kick_member":
-        return f"Kick {args.get('name_or_id')}"
-    if name == "unban_user":
-        return f"Unban {args.get('name_or_id')}"
-    if name == "delete_text_channel":
-        return f"Delete text channel #{args.get('name')}"
-    if name == "delete_voice_channel":
-        return f"Delete voice channel {args.get('name')}"
-    if name == "delete_role":
-        return f"Delete role {args.get('name')}"
-    return f"Run {name}"
+    noi = args.get("name_or_id") or args.get("name", "?")
+    labels: dict[str, str] = {
+        "ban_member": f"Ban {noi}",
+        "kick_member": f"Kick {noi}",
+        "unban_user": f"Unban {noi}",
+        "delete_text_channel": f"Delete text channel #{noi}",
+        "delete_voice_channel": f"Delete voice channel {noi}",
+        "delete_role": f"Delete role {noi}",
+    }
+    return labels.get(name, f"Run {name}")
 
 
-class ConfirmActionView(discord.ui.View):
-    """One-time confirmation view used for destructive tools."""
+class BatchConfirmView(discord.ui.View):
+    """Single confirmation embed covering one or many destructive actions."""
 
-    def __init__(self, owner_id: int, summary: str, executor):
-        super().__init__(timeout=60)
+    def __init__(self, owner_id: int, executors: list):
+        super().__init__(timeout=120)
         self.owner_id = owner_id
-        self.summary = summary
-        self.executor = executor
+        self.executors = executors  # list of (summary_str, async_callable)
         self.done = False
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -729,7 +845,7 @@ class ConfirmActionView(discord.ui.View):
             return False
         return True
 
-    async def _disable(self, interaction: discord.Interaction):
+    async def _disable(self, interaction: discord.Interaction) -> None:
         for c in self.children:
             c.disabled = True
         try:
@@ -737,58 +853,82 @@ class ConfirmActionView(discord.ui.View):
         except discord.HTTPException:
             pass
 
-    @discord.ui.button(label="✓ Confirm", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="✓ Confirm All", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button):
         if self.done:
             return
         self.done = True
         await interaction.response.defer()
-        try:
-            result = await self.executor()
-        except Exception as e:
-            result = f"Failed: {e}"
         await self._disable(interaction)
-        await interaction.followup.send(f"{ICONS['check']} {result}")
+        lines: list[str] = []
+        for summary, executor in self.executors:
+            try:
+                r = await executor()
+                lines.append(f"{ICONS['check']} {r}")
+            except Exception as e:
+                lines.append(f"{ICONS['warn']} {summary}: {e}")
+        await interaction.followup.send("\n".join(lines) or "Done.")
 
-    @discord.ui.button(label="✗ Cancel", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="✗ Cancel All", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button):
         if self.done:
             return
         self.done = True
         await interaction.response.defer()
         await self._disable(interaction)
-        await interaction.followup.send(f"{ICONS['moon']} Cancelled.")
+        await interaction.followup.send(f"{ICONS['moon']} All cancelled.")
 
 
-async def run_tool(
-    name: str,
-    args: dict,
+async def _run_tools_for_turn(
+    tool_calls: list,
     *,
     guild: discord.Guild,
     invoker: discord.Member,
     channel: discord.abc.Messageable,
-) -> str:
-    """Decide whether to run immediately or post a confirmation view first."""
-    if name in HARD_TOOLS:
-        async def _do():
-            return await _execute_tool(
-                name, args, guild=guild, invoker=invoker, channel=channel
-            )
-        summary = _summarize_action(name, args)
-        view = ConfirmActionView(invoker.id, summary, _do)
+) -> dict[str, str]:
+    """Execute all tool calls for one model turn. Batches hard-tool confirmations into ONE embed."""
+    results: dict[str, str] = {}
+    parsed: list = []
+    for tc in tool_calls:
+        try:
+            args = json.loads(tc.function.arguments or "{}")
+        except json.JSONDecodeError:
+            args = {}
+        parsed.append((tc, args))
+
+    hard = [(tc, args) for tc, args in parsed if tc.function.name in HARD_TOOLS]
+    soft = [(tc, args) for tc, args in parsed if tc.function.name not in HARD_TOOLS]
+
+    for tc, args in soft:
+        try:
+            r = await _execute_tool(tc.function.name, args, guild=guild, invoker=invoker, channel=channel)
+        except Exception as e:
+            r = f"Tool error: {e}"
+        results[tc.id] = str(r)
+
+    if hard:
+        executors: list = []
+        for tc, args in hard:
+            summary = _summarize_action(tc.function.name, args)
+            async def _exec(n=tc.function.name, a=args):
+                return await _execute_tool(n, a, guild=guild, invoker=invoker, channel=channel)
+            executors.append((summary, _exec))
+            results[tc.id] = f"Pending confirmation: {summary}"
+
+        count = len(hard)
+        desc = "\n".join(f"▣ {s}" for s, _ in executors)
+        view = BatchConfirmView(invoker.id, executors)
         embed = discord.Embed(
-            title=f"{ICONS['warn']} Confirm action",
-            description=f"**{summary}**\n\nThis is a destructive action — confirm to proceed.",
+            title=f"{ICONS['warn']} Confirm {count} action{'s' if count > 1 else ''}",
+            description=f"{desc}\n\nConfirm to proceed with all of the above.",
             color=0xFFFFFF,
         )
         try:
             await channel.send(embed=embed, view=view)
-        except discord.HTTPException as e:
-            return f"Couldn't post confirmation: {e}"
-        return f"Awaiting confirmation in chat for: {summary}"
-    return await _execute_tool(
-        name, args, guild=guild, invoker=invoker, channel=channel
-    )
+        except discord.HTTPException:
+            pass
+
+    return results
 
 
 async def _execute_tool(
@@ -799,40 +939,42 @@ async def _execute_tool(
     invoker: discord.Member,
     channel: discord.abc.Messageable,
 ) -> str:
-    """Actual tool executor. Bypasses the confirmation gate."""
+    """Actual tool executor — no confirmation gate. Enforces per-tool permissions for non-owners."""
+    reason = f"By {invoker} via {BOT_NAME}"
+
+    # --- Permission gate for non-owner guests ---
+    if invoker.id != OWNER_ID and name in TOOL_PERMS:
+        required = TOOL_PERMS[name]
+        if not getattr(invoker.guild_permissions, required, False):
+            return f"Refused: you need the **{required}** permission to do that."
+
     try:
         if name == "create_text_channel":
-            cat = None
-            if args.get("category"):
-                cat = discord.utils.get(guild.categories, name=args["category"])
-            ch = await guild.create_text_channel(
-                name=args["name"], category=cat, topic=args.get("topic")
-            )
+            cat = discord.utils.get(guild.categories, name=args["category"]) if args.get("category") else None
+            ch = await guild.create_text_channel(name=args["name"], category=cat, topic=args.get("topic"))
             return f"Created text channel #{ch.name} (id {ch.id})."
 
         if name == "create_voice_channel":
-            cat = None
-            if args.get("category"):
-                cat = discord.utils.get(guild.categories, name=args["category"])
+            cat = discord.utils.get(guild.categories, name=args["category"]) if args.get("category") else None
             ch = await guild.create_voice_channel(name=args["name"], category=cat)
             return f"Created voice channel {ch.name} (id {ch.id})."
 
         if name == "delete_text_channel":
-            target = discord.utils.get(guild.text_channels, name=args["name"].lstrip("#"))
+            target = _find_channel(guild, args.get("name_or_id") or args.get("name", ""), kind="text")
             if not target:
-                return f"Text channel #{args['name']} not found."
-            await target.delete(reason=f"By {invoker} via {BOT_NAME}")
+                return f"Text channel not found: {args.get('name_or_id') or args.get('name')}."
+            await target.delete(reason=reason)
             return f"Deleted text channel #{target.name}."
 
         if name == "delete_voice_channel":
-            target = discord.utils.get(guild.voice_channels, name=args["name"])
+            target = _find_channel(guild, args.get("name_or_id") or args.get("name", ""), kind="voice")
             if not target:
-                return f"Voice channel {args['name']} not found."
-            await target.delete(reason=f"By {invoker} via {BOT_NAME}")
+                return f"Voice channel not found: {args.get('name_or_id') or args.get('name')}."
+            await target.delete(reason=reason)
             return f"Deleted voice channel {target.name}."
 
         if name == "create_role":
-            kwargs = {"name": args["name"]}
+            kwargs: dict = {"name": args["name"]}
             if args.get("color_hex"):
                 try:
                     kwargs["colour"] = discord.Colour(int(args["color_hex"].lstrip("#"), 16))
@@ -842,42 +984,40 @@ async def _execute_tool(
                 kwargs["hoist"] = bool(args["hoist"])
             if "mentionable" in args:
                 kwargs["mentionable"] = bool(args["mentionable"])
-            role = await guild.create_role(reason=f"By {invoker} via {BOT_NAME}", **kwargs)
+            role = await guild.create_role(reason=reason, **kwargs)
             return f"Created role {role.name} (id {role.id})."
 
         if name == "delete_role":
-            role = discord.utils.find(
-                lambda r: r.name.lower() == args["name"].lower(), guild.roles
-            )
+            role = _find_role(guild, args.get("name_or_id") or args.get("name", ""))
             if not role:
-                return f"Role '{args['name']}' not found."
+                return f"Role not found: {args.get('name_or_id') or args.get('name')}."
             if role.is_default() or role.managed:
                 return f"Role {role.name} can't be deleted (default or managed)."
-            await role.delete(reason=f"By {invoker} via {BOT_NAME}")
+            await role.delete(reason=reason)
             return f"Deleted role {role.name}."
 
         if name == "unban_user":
-            target = args["name_or_id"]
+            target_str = args["name_or_id"]
             target_obj = None
             async for entry in guild.bans():
                 if (
-                    str(entry.user.id) == target
-                    or entry.user.name.lower() == target.lower()
-                    or str(entry.user) == target
+                    str(entry.user.id) == target_str
+                    or entry.user.name.lower() == target_str.lower()
+                    or str(entry.user) == target_str
                 ):
                     target_obj = entry.user
                     break
             if not target_obj:
-                return f"No ban found for '{target}'."
-            await guild.unban(target_obj, reason=f"By {invoker} via {BOT_NAME}")
+                return f"No ban found for '{target_str}'."
+            await guild.unban(target_obj, reason=reason)
             return f"Unbanned {target_obj}."
 
         if name == "send_embed":
             target = channel
             if args.get("channel"):
-                ch = discord.utils.get(guild.text_channels, name=args["channel"].lstrip("#"))
-                if ch:
-                    target = ch
+                found = _find_channel(guild, args["channel"], kind="text")
+                if found:
+                    target = found
             color = ACCENT_COLOR
             if args.get("color_hex"):
                 try:
@@ -895,43 +1035,32 @@ async def _execute_tool(
 
         if name == "list_members":
             limit = min(int(args.get("limit", 50)), 100)
-            role_filter = args.get("role_filter")
             members = list(guild.members)
-            if role_filter:
-                role = discord.utils.find(
-                    lambda r: r.name.lower() == role_filter.lower(), guild.roles
-                )
+            if args.get("role_filter"):
+                role = _find_role(guild, args["role_filter"])
                 if role:
                     members = role.members
-            members = members[:limit]
             lines = [
                 f"- {m.display_name} ({m.name}) | {m.status} | top role: {m.top_role.name}"
-                for m in members
+                for m in members[:limit]
             ]
             return f"Total members: {guild.member_count}.\n" + "\n".join(lines)
 
         if name == "kick_member":
-            if not invoker.guild_permissions.kick_members:
-                return "Refused: invoker lacks kick permission."
             m = _find_member(guild, args["name_or_id"])
             if not m:
                 return f"Member '{args['name_or_id']}' not found."
-            await m.kick(reason=args.get("reason", f"By {invoker}"))
+            await m.kick(reason=args.get("reason", reason))
             return f"Kicked {m.display_name}."
 
         if name == "ban_member":
-            if not invoker.guild_permissions.ban_members:
-                return "Refused: invoker lacks ban permission."
             m = _find_member(guild, args["name_or_id"])
             if not m:
                 return f"Member '{args['name_or_id']}' not found."
-            await m.ban(reason=args.get("reason", f"By {invoker}"), delete_message_days=0)
+            await m.ban(reason=args.get("reason", reason), delete_message_days=0)
             return f"Banned {m.display_name}."
 
         if name == "mute_member":
-            if not invoker.guild_permissions.moderate_members:
-                return "Refused: invoker lacks moderate permission."
-            from datetime import timedelta
             m = _find_member(guild, args["name_or_id"])
             if not m:
                 return f"Member '{args['name_or_id']}' not found."
@@ -948,11 +1077,26 @@ async def _execute_tool(
                 return f"Member '{args['name_or_id']}' not found."
             note = (args.get("note") or "").strip()
             content = f"{m.mention}" + (f" {note}" if note else "")
-            await channel.send(
-                content,
-                allowed_mentions=discord.AllowedMentions(users=[m]),
-            )
+            await channel.send(content, allowed_mentions=discord.AllowedMentions(users=[m]))
             return f"Pinged {m.display_name}."
+
+        if name == "broadcast_ping":
+            target_str = args["target"].lower().strip()
+            note = (args.get("note") or "").strip()
+            if target_str == "everyone":
+                content = f"@everyone" + (f" {note}" if note else "")
+                await channel.send(content, allowed_mentions=discord.AllowedMentions(everyone=True))
+                return "Sent @everyone ping."
+            if target_str == "here":
+                content = f"@here" + (f" {note}" if note else "")
+                await channel.send(content, allowed_mentions=discord.AllowedMentions(everyone=True))
+                return "Sent @here ping."
+            role = _find_role(guild, args["target"])
+            if not role:
+                return f"Role '{args['target']}' not found."
+            content = f"{role.mention}" + (f" {note}" if note else "")
+            await channel.send(content, allowed_mentions=discord.AllowedMentions(roles=[role]))
+            return f"Pinged @{role.name}."
 
         if name == "send_image":
             kind = args.get("kind", "image")
@@ -993,11 +1137,9 @@ async def _execute_tool(
         if name == "read_channel_history":
             target = channel
             if args.get("channel"):
-                found = discord.utils.get(
-                    guild.text_channels, name=args["channel"].lstrip("#")
-                )
+                found = _find_channel(guild, args["channel"], kind="text")
                 if not found:
-                    return f"Channel #{args['channel']} not found."
+                    return f"Channel '{args['channel']}' not found."
                 target = found
             limit = max(1, min(int(args.get("limit", 25)), 100))
             lines: list[str] = []
@@ -1024,9 +1166,10 @@ async def _execute_tool(
                 return "I don't have View Audit Log permission."
 
         if name == "edit_text_channel":
-            ch = discord.utils.get(guild.text_channels, name=args["name"].lstrip("#"))
+            noi = args.get("name_or_id") or args.get("name", "")
+            ch = _find_channel(guild, noi, kind="text")
             if not ch:
-                return f"Text channel #{args['name']} not found."
+                return f"Text channel not found: {noi}."
             kwargs = {}
             if args.get("new_name"):
                 kwargs["name"] = args["new_name"]
@@ -1034,27 +1177,34 @@ async def _execute_tool(
                 kwargs["topic"] = args["new_topic"]
             if "slowmode_seconds" in args:
                 kwargs["slowmode_delay"] = int(args["slowmode_seconds"])
-            await ch.edit(reason=f"By {invoker} via {BOT_NAME}", **kwargs)
+            await ch.edit(reason=reason, **kwargs)
             return f"Updated #{ch.name}."
 
         if name == "edit_voice_channel":
-            ch = discord.utils.get(guild.voice_channels, name=args["name"])
+            noi = args.get("name_or_id") or args.get("name", "")
+            ch = _find_channel(guild, noi, kind="voice")
             if not ch:
-                return f"Voice channel {args['name']} not found."
+                return f"Voice channel not found: {noi}."
             kwargs = {}
             if args.get("new_name"):
                 kwargs["name"] = args["new_name"]
             if "user_limit" in args:
                 kwargs["user_limit"] = int(args["user_limit"])
-            await ch.edit(reason=f"By {invoker} via {BOT_NAME}", **kwargs)
+            await ch.edit(reason=reason, **kwargs)
             return f"Updated voice channel {ch.name}."
 
+        if name == "reorder_channel":
+            ch = _find_channel(guild, args["name_or_id"])
+            if not ch:
+                return f"Channel not found: {args['name_or_id']}."
+            await ch.edit(position=int(args["position"]), reason=reason)
+            return f"Moved {ch.name} to position {args['position']}."
+
         if name == "edit_role":
-            role = discord.utils.find(
-                lambda r: r.name.lower() == args["name"].lower(), guild.roles
-            )
+            noi = args.get("name_or_id") or args.get("name", "")
+            role = _find_role(guild, noi)
             if not role:
-                return f"Role '{args['name']}' not found."
+                return f"Role not found: {noi}."
             kwargs = {}
             if args.get("new_name"):
                 kwargs["name"] = args["new_name"]
@@ -1067,22 +1217,27 @@ async def _execute_tool(
                 kwargs["hoist"] = bool(args["hoist"])
             if "mentionable" in args:
                 kwargs["mentionable"] = bool(args["mentionable"])
-            await role.edit(reason=f"By {invoker} via {BOT_NAME}", **kwargs)
+            await role.edit(reason=reason, **kwargs)
             return f"Updated role {role.name}."
+
+        if name == "reorder_role":
+            role = _find_role(guild, args["name_or_id"])
+            if not role:
+                return f"Role not found: {args['name_or_id']}."
+            await role.edit(position=int(args["position"]), reason=reason)
+            return f"Moved role {role.name} to position {args['position']}."
 
         if name in ("add_role_to_member", "remove_role_from_member"):
             m = _find_member(guild, args["member"])
             if not m:
                 return f"Member '{args['member']}' not found."
-            role = discord.utils.find(
-                lambda r: r.name.lower() == args["role"].lower(), guild.roles
-            )
+            role = _find_role(guild, args["role"])
             if not role:
                 return f"Role '{args['role']}' not found."
             if name == "add_role_to_member":
-                await m.add_roles(role, reason=f"By {invoker} via {BOT_NAME}")
+                await m.add_roles(role, reason=reason)
                 return f"Added role {role.name} to {m.display_name}."
-            await m.remove_roles(role, reason=f"By {invoker} via {BOT_NAME}")
+            await m.remove_roles(role, reason=reason)
             return f"Removed role {role.name} from {m.display_name}."
 
         if name == "edit_member":
@@ -1090,8 +1245,16 @@ async def _execute_tool(
             if not m:
                 return f"Member '{args['name_or_id']}' not found."
             new_nick = args["nickname"] or None
-            await m.edit(nick=new_nick, reason=f"By {invoker} via {BOT_NAME}")
+            await m.edit(nick=new_nick, reason=reason)
             return f"Set {m.name}'s nickname to {new_nick or '(cleared)'}."
+
+        if name == "run_minigame":
+            return await _run_minigame(
+                args.get("game_type", "custom"),
+                args.get("config", {}),
+                channel=channel,
+                guild=guild,
+            )
 
         if name == "create_poll":
             opts = [str(o)[:55] for o in args["options"][:10]]
@@ -1164,6 +1327,122 @@ async def _execute_tool(
     except Exception as e:
         return f"Tool {name} failed: {e}"
     return f"Unknown tool: {name}"
+
+
+# ---------------------------------------------------------------------------
+# Mini-game engine
+# ---------------------------------------------------------------------------
+
+
+async def _run_minigame(game_type: str, config: dict, *, channel, guild) -> str:
+    def _check(m):
+        return m.channel.id == channel.id and not m.author.bot
+
+    if game_type == "trivia":
+        questions = config.get("questions", [])
+        if not questions:
+            return "No questions provided in config."
+        time_limit = int(config.get("time_limit_seconds", 30))
+        scores: dict[str, int] = {}
+        for i, q in enumerate(questions[:10]):
+            question = q.get("question") or q.get("q", "?")
+            answer = str(q.get("answer") or q.get("a", "")).lower().strip()
+            embed = discord.Embed(
+                title=f"❓ Question {i + 1}/{len(questions)}",
+                description=question,
+                color=ACCENT_COLOR,
+            )
+            embed.set_footer(text=f"{time_limit}s to answer")
+            await channel.send(embed=embed)
+            try:
+                msg = await bot.wait_for("message", timeout=time_limit, check=_check)
+                if msg.content.lower().strip() == answer:
+                    scores[msg.author.display_name] = scores.get(msg.author.display_name, 0) + 1
+                    await msg.add_reaction("✅")
+                    await channel.send(f"✅ Correct — **{q.get('answer') or q.get('a')}**!")
+                else:
+                    await msg.add_reaction("❌")
+                    await channel.send(f"❌ Wrong — answer was **{q.get('answer') or q.get('a')}**")
+            except asyncio.TimeoutError:
+                await channel.send(f"⏰ Time's up! Answer: **{q.get('answer') or q.get('a')}**")
+        if scores:
+            winner = max(scores, key=scores.get)
+            lines = "\n".join(f"• {n}: {s} pt(s)" for n, s in sorted(scores.items(), key=lambda x: -x[1]))
+            embed = discord.Embed(title="🏆 Game Over!", description=f"**Winner: {winner}**\n\n{lines}", color=ACCENT_COLOR)
+        else:
+            embed = discord.Embed(title="Game Over", description="Nobody scored. Tragic.", color=ACCENT_COLOR)
+        await channel.send(embed=embed)
+        return "Trivia finished."
+
+    if game_type == "number_guess":
+        low = int(config.get("min", 1))
+        high = int(config.get("max", 100))
+        max_guesses = int(config.get("max_guesses", 7))
+        secret = random.randint(low, high)
+        await channel.send(f"🎲 Guess the number between **{low}** and **{high}**! You have **{max_guesses}** tries.")
+
+        def _num_check(m):
+            return m.channel.id == channel.id and not m.author.bot and m.content.strip().lstrip("-").isdigit()
+
+        for attempt in range(1, max_guesses + 1):
+            try:
+                msg = await bot.wait_for("message", timeout=30, check=_num_check)
+                guess = int(msg.content.strip())
+                if guess == secret:
+                    await channel.send(f"✅ **{msg.author.display_name}** got it in {attempt} guess(es)! The number was **{secret}**.")
+                    return "Number guessing game done."
+                hint = "📈 Higher!" if guess < secret else "📉 Lower!"
+                left = max_guesses - attempt
+                await msg.reply(f"{hint} ({left} guess{'es' if left != 1 else ''} left)")
+            except asyncio.TimeoutError:
+                await channel.send(f"⏰ Too slow. The number was **{secret}**.")
+                return "Number guessing game timed out."
+        await channel.send(f"💀 Out of guesses! The number was **{secret}**.")
+        return "Number guessing game done."
+
+    if game_type == "word_scramble":
+        words = config.get("words", [])
+        if not words:
+            return "No words provided in config."
+        time_limit = int(config.get("time_limit_seconds", 30))
+        scores: dict[str, int] = {}
+        for i, word in enumerate(words[:10]):
+            scrambled = word
+            while scrambled == word and len(word) > 1:
+                scrambled = "".join(random.sample(word, len(word)))
+            embed = discord.Embed(
+                title=f"🔤 Word Scramble {i + 1}/{len(words)}",
+                description=f"Unscramble: **{scrambled.upper()}**",
+                color=ACCENT_COLOR,
+            )
+            embed.set_footer(text=f"{time_limit}s to answer")
+            await channel.send(embed=embed)
+            try:
+                msg = await bot.wait_for("message", timeout=time_limit, check=_check)
+                if msg.content.lower().strip() == word.lower():
+                    scores[msg.author.display_name] = scores.get(msg.author.display_name, 0) + 1
+                    await msg.add_reaction("✅")
+                    await channel.send(f"✅ Correct — **{word}**!")
+                else:
+                    await msg.add_reaction("❌")
+                    await channel.send(f"❌ The word was **{word}**")
+            except asyncio.TimeoutError:
+                await channel.send(f"⏰ Time's up! The word was **{word}**")
+        if scores:
+            winner = max(scores, key=scores.get)
+            lines = "\n".join(f"• {n}: {s} pt(s)" for n, s in sorted(scores.items(), key=lambda x: -x[1]))
+            embed = discord.Embed(title="🏆 Round Over!", description=f"**Winner: {winner}**\n\n{lines}", color=ACCENT_COLOR)
+        else:
+            embed = discord.Embed(title="Round Over", description="Nobody got any. Painful.", color=ACCENT_COLOR)
+        await channel.send(embed=embed)
+        return "Word scramble done."
+
+    # custom / fallback — just post a game card
+    title = config.get("title", "Mini-Game")
+    description = config.get("description", "Let's play!")
+    embed = discord.Embed(title=f"🎮 {title}", description=description, color=ACCENT_COLOR)
+    await channel.send(embed=embed)
+    return f"Posted game: {title}"
 
 
 # ---------------------------------------------------------------------------
@@ -1475,23 +1754,15 @@ async def chat_with_tools(
                 ],
             }
         )
+        turn_results = await _run_tools_for_turn(
+            tool_calls, guild=guild, invoker=invoker, channel=channel
+        )
         for tc in tool_calls:
-            try:
-                args = json.loads(tc.function.arguments or "{}")
-            except json.JSONDecodeError:
-                args = {}
-            result = await run_tool(
-                tc.function.name,
-                args,
-                guild=guild,
-                invoker=invoker,
-                channel=channel,
-            )
             convo.append(
                 {
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": str(result)[:1500],
+                    "content": turn_results.get(tc.id, "No result")[:1500],
                 }
             )
     return "Done." if not msg.content else msg.content.strip()
