@@ -1788,7 +1788,7 @@ async def chat_with_tools(
                 messages=convo,
                 tools=TOOLS,
                 tool_choice="auto",
-                max_completion_tokens=700,
+                max_completion_tokens=4096,
             )
         except Exception as e:
             await _flush_hard_confirm(all_hard, invoker=invoker, channel=channel)
