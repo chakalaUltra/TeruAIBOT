@@ -102,6 +102,13 @@ def _card(
     return discord.ui.Container(*items, accent_colour=discord.Colour(color))
 
 
+def _lv(card: discord.ui.Container) -> discord.ui.LayoutView:
+    """Wrap a Container in a LayoutView so it can be passed as view= to send/respond."""
+    lv = discord.ui.LayoutView()
+    lv.add_item(card)
+    return lv
+
+
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 MEMORY_FILE = DATA_DIR / "memory.json"
@@ -549,7 +556,7 @@ async def _execute_tool(
                 footer=f"Posted by {BOT_NAME}",
                 color=color,
             )
-            await target.send(components=[card], flags=_V2)
+            await target.send(view=_lv(card))
             return f"Embed posted in #{getattr(target, 'name', 'channel')}."
 
         if name == "list_members":
@@ -1335,7 +1342,7 @@ class ServerInsightsSelect(discord.ui.Select):
             body = f"**Online** {len(online)}" + (f"\n{names}" if names else "")
 
         card = _card(title, body, footer=BOT_NAME)
-        await interaction.response.send_message(components=[card], flags=_V2, ephemeral=True)
+        await interaction.response.send_message(view=_lv(card), ephemeral=True)
 
 
 class InsightsView(discord.ui.LayoutView):
@@ -1556,7 +1563,7 @@ async def roles_cmd(interaction: discord.Interaction):
     roles = sorted(interaction.guild.roles, key=lambda r: -r.position)
     lines = "\n".join(f"{ICONS['diamond']} {r.mention} — {len(r.members)} member(s)" for r in roles[:25])
     card = _card(f"Roles ({len(roles)})", lines or "No roles.")
-    await interaction.response.send_message(components=[card], flags=_V2)
+    await interaction.response.send_message(view=_lv(card))
 
 
 @bot.tree.command(name="members", description="Show member counts and a sample.")
@@ -1571,7 +1578,7 @@ async def members_cmd(interaction: discord.Interaction):
         f"{sample or '—'}"
     )
     card = _card(f"{ICONS['circle']} Members — {g.name}", body)
-    await interaction.response.send_message(components=[card], flags=_V2)
+    await interaction.response.send_message(view=_lv(card))
 
 
 @bot.tree.command(name="search", description="Search the web.")
@@ -1592,7 +1599,7 @@ async def search_cmd(interaction: discord.Interaction, query: str):
         ]
     )
     card = _card(f"{ICONS['search']} {query}", summary[:4000], footer=f"{BOT_NAME} — web search")
-    await interaction.followup.send(components=[card], flags=_V2)
+    await interaction.followup.send(view=_lv(card))
 
 
 @bot.tree.command(name="embed", description="Send a custom styled embed.")
@@ -1610,7 +1617,7 @@ async def embed_cmd(
         except ValueError:
             pass
     card = _card(title, body, footer=f"via {BOT_NAME} · {interaction.user.display_name}", color=color)
-    await interaction.response.send_message(components=[card], flags=_V2)
+    await interaction.response.send_message(view=_lv(card))
 
 
 @bot.tree.command(name="remember", description="Make Teru remember a fact.")
@@ -1664,7 +1671,7 @@ async def about_cmd(interaction: discord.Interaction):
         f"{ICONS['diamond']} I learn from how you speak and may reach out on my own."
     )
     card = _card(f"{ICONS['spark']} I am {BOT_NAME}", body, footer="At your service.")
-    await interaction.response.send_message(components=[card], flags=_V2)
+    await interaction.response.send_message(view=_lv(card))
 
 
 # ---------------------------------------------------------------------------
