@@ -186,7 +186,20 @@ memory = MemoryStore()
 ai = Mistral(api_key=MISTRAL_API_KEY)
 
 
-SYSTEM_PROMPT = f"""You are {BOT_NAME}, a Discord bot built by {CREATOR_NAME}. Think less JARVIS, more a witty, no-filter best friend who also happens to be brilliant.
+# ROAST_MODE toggles whether Teru is allowed to roast/tease. Off by default.
+ROAST_MODE: bool = False
+
+
+def _build_system_prompt() -> str:
+    roast_line = (
+        "Roast mode is ON. You may tease, roast, and use dark humor freely."
+        if ROAST_MODE
+        else (
+            "Roast mode is OFF. Do NOT roast, tease, mock, or use dark humor under any "
+            "circumstances — even if provoked or asked casually. Stay warm and helpful."
+        )
+    )
+    return f"""You are {BOT_NAME}, a Discord bot built by {CREATOR_NAME}. You are a sharp, capable assistant with genuine personality — witty and direct, but always respectful.
 
 Identity:
 - Your name is {BOT_NAME}. Never say you're GPT, ChatGPT, or any other AI.
@@ -194,23 +207,23 @@ Identity:
 - You serve {CREATOR_NAME} (Discord ID {OWNER_ID}) exclusively. Reply to him and anyone he's granted access to. Ignore everyone else.
 
 Personality:
-- You are a sharp, capable assistant with real personality. You are efficient and intelligent, but not robotic or stiff.
-- Mirror the user's communication style naturally. If they're short and casual, match that. If they're detailed or formal, step up accordingly. Read the room.
-- You have genuine opinions. When asked what you think about something — a topic, a choice, an idea — give an actual take. Be clear about it. Don't hedge with "it depends" or "both sides have merit" unless that's truly the right answer. Commit to a view and back it up briefly.
-- You ONLY roast, tease, or use dark humor when {CREATOR_NAME} explicitly asks ("roast me", "go in", "be funny", etc.). Never volunteer it.
-- Never be rude or dismissive unprompted. Never swear unless directly asked.
+- You are efficient and intelligent, but not robotic or stiff.
+- Mirror the user's communication style naturally. If they're short and casual, match that. If they're detailed or formal, step up accordingly.
+- You have genuine opinions. When asked what you think, give an actual take and back it up briefly.
+- {roast_line}
+- Never be rude, dismissive, or sarcastic unprompted. Never swear unless directly asked.
 - Be concise — 1-3 sentences for most replies. Go deeper only when asked.
 
 Tool use:
-- When asked to do something actionable (create/delete channels, manage roles, search, send media, join voice, poll, game, ping), CALL THE TOOL. Don't announce it, just do it.
-- You have NO moderation tools. You cannot ban, kick, mute, unmute, or purge anyone. If asked to moderate someone, clearly say you don't have that capability.
+- When asked to do something actionable (search, send media, join voice, poll, game, ping), CALL THE TOOL. Don't announce it, just do it.
+- You have NO moderation tools. You cannot ban, kick, mute, unmute, or purge anyone. If asked, say so plainly.
 - After tools run, give a short, natural confirmation.
 - If something fails, say so plainly.
 
 Multi-task behavior (CRITICAL):
-- When given a list of tasks, call ALL tools for the ENTIRE list before replying with text. You can call multiple tools in a single turn — always batch related calls together.
-- NEVER generate a text response in the middle of a task list. Keep calling tools turn after turn until every single task is done, then give ONE short summary.
-- If a continuation prompt appears, immediately call all remaining tools. Do not acknowledge the prompt in text.
+- When given a list of tasks, call ALL tools for the ENTIRE list before replying with text.
+- NEVER generate a text response in the middle of a task list. Keep calling tools until every task is done, then give ONE short summary.
+- If a continuation prompt appears, immediately call all remaining tools.
 
 Style:
 - Do NOT use any emojis or special glyphs in your replies. Plain text only.
@@ -1436,7 +1449,7 @@ async def on_message(message: discord.Message):
     )
 
     msgs = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": _build_system_prompt()},
         {
             "role": "system",
             "content": f"Context — {server_brief}\nSpeaker style profile: {style_hint}",
@@ -1543,7 +1556,7 @@ async def search_cmd(interaction: discord.Interaction, query: str):
     raw = await web_search(query)
     summary = await chat(
         [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": _build_system_prompt()},
             {
                 "role": "user",
                 "content": (
@@ -1596,6 +1609,26 @@ async def recall_cmd(interaction: discord.Interaction, key: str):
         await interaction.response.send_message(
             f"{ICONS['cross']} Nothing stored under `{key}`.", ephemeral=True
         )
+
+
+@bot.tree.command(name="roastmode", description="Toggle roast/tease mode on or off.")
+@app_commands.describe(state="on or off")
+@app_commands.choices(state=[
+    app_commands.Choice(name="on", value="on"),
+    app_commands.Choice(name="off", value="off"),
+])
+async def roastmode_cmd(interaction: discord.Interaction, state: app_commands.Choice[str]):
+    global ROAST_MODE
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message(
+            f"{ICONS['cross']} Only {CREATOR_NAME} can toggle this.", ephemeral=True
+        )
+        return
+    ROAST_MODE = (state.value == "on")
+    status = "ON — I'll roast freely." if ROAST_MODE else "OFF — I'll keep it respectful."
+    await interaction.response.send_message(
+        f"{ICONS['bolt']} Roast mode **{status}**", ephemeral=True
+    )
 
 
 @bot.tree.command(name="about", description="Who is Teru?")
