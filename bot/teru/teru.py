@@ -225,37 +225,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "create_text_channel",
-            "description": "Create a new text channel in the current server.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "category": {"type": "string", "description": "Optional category name."},
-                    "topic": {"type": "string"},
-                },
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_voice_channel",
-            "description": "Create a new voice channel in the current server.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "category": {"type": "string"},
-                },
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "send_embed",
             "description": "Send a styled embed to a channel by name (or current channel if omitted).",
             "parameters": {
@@ -315,121 +284,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "grant_listen_access",
-            "description": (
-                "Temporarily allow another member to talk to Teru. "
-                "Only the owner can call this."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name_or_id": {"type": "string"},
-                },
-                "required": ["name_or_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "delete_text_channel",
-            "description": "Delete a text channel by name.",
-            "parameters": {
-                "type": "object",
-                "properties": {"name": {"type": "string"}},
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "delete_voice_channel",
-            "description": "Delete a voice channel by name.",
-            "parameters": {
-                "type": "object",
-                "properties": {"name": {"type": "string"}},
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_role",
-            "description": "Create a new role.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "color_hex": {"type": "string", "description": "Optional hex like 6E5BFF."},
-                    "hoist": {"type": "boolean", "description": "Display members separately."},
-                    "mentionable": {"type": "boolean"},
-                },
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "delete_role",
-            "description": "Delete a role by name.",
-            "parameters": {
-                "type": "object",
-                "properties": {"name": {"type": "string"}},
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "reorder_channel",
-            "description": "Move a text or voice channel to a new position (0 = top). Accepts name or ID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name_or_id": {"type": "string"},
-                    "position": {"type": "integer", "minimum": 0},
-                },
-                "required": ["name_or_id", "position"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "reorder_role",
-            "description": "Move a role to a new position (1 = bottom, higher = more powerful). Accepts name or ID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name_or_id": {"type": "string"},
-                    "position": {"type": "integer", "minimum": 1},
-                },
-                "required": ["name_or_id", "position"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "broadcast_ping",
-            "description": "Send @here, @everyone, or mention a role by name/ID. Requires invoker to have mention_everyone permission.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "target": {"type": "string", "description": "'here', 'everyone', or a role name/ID."},
-                    "note": {"type": "string", "description": "Optional message after the mention."},
-                },
-                "required": ["target"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "run_minigame",
             "description": (
                 "Run an interactive mini-game in the channel. "
@@ -463,118 +317,6 @@ TOOLS = [
                     "channel": {"type": "string", "description": "Channel name. Omit for current channel."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "How many messages back (default 25)."},
                 },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "view_audit_log",
-            "description": (
-                "View recent server audit-log entries (joins, role changes, bans, "
-                "channel edits, etc.). Returns a compact summary."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_text_channel",
-            "description": "Rename or update a text channel's topic/slowmode.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "new_name": {"type": "string"},
-                    "new_topic": {"type": "string"},
-                    "slowmode_seconds": {"type": "integer", "minimum": 0, "maximum": 21600},
-                },
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_voice_channel",
-            "description": "Rename a voice channel or change its user limit.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "new_name": {"type": "string"},
-                    "user_limit": {"type": "integer", "minimum": 0, "maximum": 99},
-                },
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_role",
-            "description": "Update a role's name, color, hoist or mentionable flag.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "new_name": {"type": "string"},
-                    "color_hex": {"type": "string"},
-                    "hoist": {"type": "boolean"},
-                    "mentionable": {"type": "boolean"},
-                },
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "add_role_to_member",
-            "description": "Give a role to a member.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "member": {"type": "string"},
-                    "role": {"type": "string"},
-                },
-                "required": ["member", "role"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "remove_role_from_member",
-            "description": "Remove a role from a member.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "member": {"type": "string"},
-                    "role": {"type": "string"},
-                },
-                "required": ["member", "role"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_member",
-            "description": "Change a member's server nickname.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name_or_id": {"type": "string"},
-                    "nickname": {"type": "string", "description": "Empty string to clear."},
-                },
-                "required": ["name_or_id", "nickname"],
             },
         },
     },
@@ -664,22 +406,6 @@ TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "revoke_listen_access",
-            "description": (
-                "Revoke previously granted access for a member, or pass 'all' to revoke everyone."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name_or_id": {"type": "string"},
-                },
-                "required": ["name_or_id"],
-            },
-        },
-    },
 ]
 
 
@@ -730,92 +456,6 @@ def _find_member(guild: discord.Guild, name_or_id: str) -> discord.Member | None
     return None
 
 
-HARD_TOOLS = {
-    "delete_text_channel",
-    "delete_voice_channel",
-    "delete_role",
-}
-
-TOOL_PERMS: dict[str, str] = {
-    "delete_text_channel": "manage_channels",
-    "delete_voice_channel": "manage_channels",
-    "create_text_channel": "manage_channels",
-    "create_voice_channel": "manage_channels",
-    "edit_text_channel": "manage_channels",
-    "edit_voice_channel": "manage_channels",
-    "reorder_channel": "manage_channels",
-    "create_role": "manage_roles",
-    "delete_role": "manage_roles",
-    "edit_role": "manage_roles",
-    "reorder_role": "manage_roles",
-    "add_role_to_member": "manage_roles",
-    "remove_role_from_member": "manage_roles",
-    "edit_member": "manage_nicknames",
-    "broadcast_ping": "mention_everyone",
-}
-
-
-def _summarize_action(name: str, args: dict) -> str:
-    noi = args.get("name_or_id") or args.get("name", "?")
-    labels: dict[str, str] = {
-        "delete_text_channel": f"Delete text channel #{noi}",
-        "delete_voice_channel": f"Delete voice channel {noi}",
-        "delete_role": f"Delete role {noi}",
-    }
-    return labels.get(name, f"Run {name}")
-
-
-class BatchConfirmView(discord.ui.View):
-    """Single confirmation embed for destructive channel/role actions."""
-
-    def __init__(self, owner_id: int, executors: list):
-        super().__init__(timeout=120)
-        self.owner_id = owner_id
-        self.executors = executors
-        self.done = False
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message(
-                "Only the owner can confirm this.", ephemeral=True
-            )
-            return False
-        return True
-
-    async def _disable(self, interaction: discord.Interaction) -> None:
-        for c in self.children:
-            c.disabled = True
-        try:
-            await interaction.message.edit(view=self)
-        except discord.HTTPException:
-            pass
-
-    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button):
-        if self.done:
-            return
-        self.done = True
-        await interaction.response.defer()
-        await self._disable(interaction)
-        lines: list[str] = []
-        for summary, executor in self.executors:
-            try:
-                r = await executor()
-                lines.append(f"Done — {r}")
-            except Exception as e:
-                lines.append(f"Failed — {summary}: {e}")
-        await interaction.followup.send("\n".join(lines) or "Done.")
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button):
-        if self.done:
-            return
-        self.done = True
-        await interaction.response.defer()
-        await self._disable(interaction)
-        await interaction.followup.send("Cancelled.")
-
-
 async def _run_tools_for_turn(
     tool_calls: list,
     *,
@@ -824,87 +464,18 @@ async def _run_tools_for_turn(
     channel: discord.abc.Messageable,
     hard_accumulator: list | None = None,
 ) -> dict[str, str]:
-    """Execute all tool calls for one model turn.
-
-    Soft tools run immediately. Hard tools are either sent to a per-turn
-    BatchConfirmView (hard_accumulator=None) or appended to hard_accumulator
-    so the caller can flush ONE combined embed after all turns finish.
-    """
     results: dict[str, str] = {}
-    parsed: list = []
     for tc in tool_calls:
         try:
             args = json.loads(tc.function.arguments or "{}")
         except json.JSONDecodeError:
             args = {}
-        parsed.append((tc, args))
-
-    hard = [(tc, args) for tc, args in parsed if tc.function.name in HARD_TOOLS]
-    soft = [(tc, args) for tc, args in parsed if tc.function.name not in HARD_TOOLS]
-
-    for tc, args in soft:
         try:
             r = await _execute_tool(tc.function.name, args, guild=guild, invoker=invoker, channel=channel)
         except Exception as e:
             r = f"Tool error: {e}"
         results[tc.id] = str(r)
-
-    for tc, args in hard:
-        summary = _summarize_action(tc.function.name, args)
-        async def _exec(n=tc.function.name, a=args):
-            return await _execute_tool(n, a, guild=guild, invoker=invoker, channel=channel)
-        results[tc.id] = f"Queued for confirmation: {summary}"
-        if hard_accumulator is not None:
-            hard_accumulator.append((summary, _exec))
-        else:
-            # Legacy single-turn path (not used by chat_with_tools anymore).
-            executors = [(summary, _exec)]
-            view = BatchConfirmView(invoker.id, executors)
-            embed = discord.Embed(
-                title=f"{ICONS['warn']} Confirm action",
-                description=f"▣ {summary}\n\nConfirm to proceed.",
-                color=0xFFFFFF,
-            )
-            try:
-                await channel.send(embed=embed, view=view)
-            except discord.HTTPException:
-                pass
-
     return results
-
-
-async def _flush_hard_confirm(
-    hard_executors: list,
-    *,
-    invoker: discord.Member,
-    channel: discord.abc.Messageable,
-) -> None:
-    """Send ONE BatchConfirmView embed covering every accumulated hard action."""
-    if not hard_executors:
-        return
-    count = len(hard_executors)
-    lines = [f"▣ {s}" for s, _ in hard_executors]
-    # Keep description under Discord's 4096-char embed limit.
-    desc_lines: list[str] = []
-    total = 0
-    for line in lines:
-        if total + len(line) + 1 > 3800:
-            remaining = count - len(desc_lines)
-            desc_lines.append(f"▣ … and {remaining} more action(s)")
-            break
-        desc_lines.append(line)
-        total += len(line) + 1
-    desc = "\n".join(desc_lines) + "\n\nConfirm to proceed with all of the above."
-    view = BatchConfirmView(invoker.id, hard_executors)
-    embed = discord.Embed(
-        title=f"{ICONS['warn']} Confirm {count} action{'s' if count > 1 else ''}",
-        description=desc,
-        color=0xFFFFFF,
-    )
-    try:
-        await channel.send(embed=embed, view=view)
-    except discord.HTTPException:
-        pass
 
 
 async def _execute_tool(
@@ -915,63 +486,8 @@ async def _execute_tool(
     invoker: discord.Member,
     channel: discord.abc.Messageable,
 ) -> str:
-    """Actual tool executor — no confirmation gate. Enforces per-tool permissions for non-owners."""
-    reason = f"By {invoker} via {BOT_NAME}"
-
-    # --- Permission gate for non-owner guests ---
-    if invoker.id != OWNER_ID and name in TOOL_PERMS:
-        required = TOOL_PERMS[name]
-        if not getattr(invoker.guild_permissions, required, False):
-            return f"Refused: you need the **{required}** permission to do that."
-
+    """Tool executor. All tools are assistant-only — no server management."""
     try:
-        if name == "create_text_channel":
-            cat = discord.utils.get(guild.categories, name=args["category"]) if args.get("category") else None
-            ch = await guild.create_text_channel(name=args["name"], category=cat, topic=args.get("topic"))
-            return f"Created text channel #{ch.name} (id {ch.id})."
-
-        if name == "create_voice_channel":
-            cat = discord.utils.get(guild.categories, name=args["category"]) if args.get("category") else None
-            ch = await guild.create_voice_channel(name=args["name"], category=cat)
-            return f"Created voice channel {ch.name} (id {ch.id})."
-
-        if name == "delete_text_channel":
-            target = _find_channel(guild, args.get("name_or_id") or args.get("name", ""), kind="text")
-            if not target:
-                return f"Text channel not found: {args.get('name_or_id') or args.get('name')}."
-            await target.delete(reason=reason)
-            return f"Deleted text channel #{target.name}."
-
-        if name == "delete_voice_channel":
-            target = _find_channel(guild, args.get("name_or_id") or args.get("name", ""), kind="voice")
-            if not target:
-                return f"Voice channel not found: {args.get('name_or_id') or args.get('name')}."
-            await target.delete(reason=reason)
-            return f"Deleted voice channel {target.name}."
-
-        if name == "create_role":
-            kwargs: dict = {"name": args["name"]}
-            if args.get("color_hex"):
-                try:
-                    kwargs["colour"] = discord.Colour(int(args["color_hex"].lstrip("#"), 16))
-                except ValueError:
-                    pass
-            if "hoist" in args:
-                kwargs["hoist"] = bool(args["hoist"])
-            if "mentionable" in args:
-                kwargs["mentionable"] = bool(args["mentionable"])
-            role = await guild.create_role(reason=reason, **kwargs)
-            return f"Created role {role.name} (id {role.id})."
-
-        if name == "delete_role":
-            role = _find_role(guild, args.get("name_or_id") or args.get("name", ""))
-            if not role:
-                return f"Role not found: {args.get('name_or_id') or args.get('name')}."
-            if role.is_default() or role.managed:
-                return f"Role {role.name} can't be deleted (default or managed)."
-            await role.delete(reason=reason)
-            return f"Deleted role {role.name}."
-
         if name == "send_embed":
             target = channel
             if args.get("channel"):
@@ -1017,24 +533,6 @@ async def _execute_tool(
             content = f"{m.mention}" + (f" {note}" if note else "")
             await channel.send(content, allowed_mentions=discord.AllowedMentions(users=[m]))
             return f"Pinged {m.display_name}."
-
-        if name == "broadcast_ping":
-            target_str = args["target"].lower().strip()
-            note = (args.get("note") or "").strip()
-            if target_str == "everyone":
-                content = f"@everyone" + (f" {note}" if note else "")
-                await channel.send(content, allowed_mentions=discord.AllowedMentions(everyone=True))
-                return "Sent @everyone ping."
-            if target_str == "here":
-                content = f"@here" + (f" {note}" if note else "")
-                await channel.send(content, allowed_mentions=discord.AllowedMentions(everyone=True))
-                return "Sent @here ping."
-            role = _find_role(guild, args["target"])
-            if not role:
-                return f"Role '{args['target']}' not found."
-            content = f"{role.mention}" + (f" {note}" if note else "")
-            await channel.send(content, allowed_mentions=discord.AllowedMentions(roles=[role]))
-            return f"Pinged @{role.name}."
 
         if name == "send_image":
             kind = args.get("kind", "image")
@@ -1089,102 +587,6 @@ async def _execute_tool(
                 lines.append(f"[{ts}] {m.author.display_name}: {content[:200]}")
             lines.reverse()
             return "Recent messages:\n" + "\n".join(lines) if lines else "No messages."
-
-        if name == "view_audit_log":
-            limit = max(1, min(int(args.get("limit", 15)), 50))
-            try:
-                entries = []
-                async for e in guild.audit_logs(limit=limit):
-                    ts = e.created_at.strftime("%m-%d %H:%M")
-                    actor = e.user.display_name if e.user else "?"
-                    target_name = getattr(e.target, "name", None) or str(e.target)
-                    entries.append(f"[{ts}] {actor} → {e.action.name} → {target_name}")
-                return "Audit log:\n" + ("\n".join(entries) if entries else "(empty)")
-            except discord.Forbidden:
-                return "I don't have View Audit Log permission."
-
-        if name == "edit_text_channel":
-            noi = args.get("name_or_id") or args.get("name", "")
-            ch = _find_channel(guild, noi, kind="text")
-            if not ch:
-                return f"Text channel not found: {noi}."
-            kwargs = {}
-            if args.get("new_name"):
-                kwargs["name"] = args["new_name"]
-            if "new_topic" in args:
-                kwargs["topic"] = args["new_topic"]
-            if "slowmode_seconds" in args:
-                kwargs["slowmode_delay"] = int(args["slowmode_seconds"])
-            await ch.edit(reason=reason, **kwargs)
-            return f"Updated #{ch.name}."
-
-        if name == "edit_voice_channel":
-            noi = args.get("name_or_id") or args.get("name", "")
-            ch = _find_channel(guild, noi, kind="voice")
-            if not ch:
-                return f"Voice channel not found: {noi}."
-            kwargs = {}
-            if args.get("new_name"):
-                kwargs["name"] = args["new_name"]
-            if "user_limit" in args:
-                kwargs["user_limit"] = int(args["user_limit"])
-            await ch.edit(reason=reason, **kwargs)
-            return f"Updated voice channel {ch.name}."
-
-        if name == "reorder_channel":
-            ch = _find_channel(guild, args["name_or_id"])
-            if not ch:
-                return f"Channel not found: {args['name_or_id']}."
-            await ch.edit(position=int(args["position"]), reason=reason)
-            return f"Moved {ch.name} to position {args['position']}."
-
-        if name == "edit_role":
-            noi = args.get("name_or_id") or args.get("name", "")
-            role = _find_role(guild, noi)
-            if not role:
-                return f"Role not found: {noi}."
-            kwargs = {}
-            if args.get("new_name"):
-                kwargs["name"] = args["new_name"]
-            if args.get("color_hex"):
-                try:
-                    kwargs["colour"] = discord.Colour(int(args["color_hex"].lstrip("#"), 16))
-                except ValueError:
-                    pass
-            if "hoist" in args:
-                kwargs["hoist"] = bool(args["hoist"])
-            if "mentionable" in args:
-                kwargs["mentionable"] = bool(args["mentionable"])
-            await role.edit(reason=reason, **kwargs)
-            return f"Updated role {role.name}."
-
-        if name == "reorder_role":
-            role = _find_role(guild, args["name_or_id"])
-            if not role:
-                return f"Role not found: {args['name_or_id']}."
-            await role.edit(position=int(args["position"]), reason=reason)
-            return f"Moved role {role.name} to position {args['position']}."
-
-        if name in ("add_role_to_member", "remove_role_from_member"):
-            m = _find_member(guild, args["member"])
-            if not m:
-                return f"Member '{args['member']}' not found."
-            role = _find_role(guild, args["role"])
-            if not role:
-                return f"Role '{args['role']}' not found."
-            if name == "add_role_to_member":
-                await m.add_roles(role, reason=reason)
-                return f"Added role {role.name} to {m.display_name}."
-            await m.remove_roles(role, reason=reason)
-            return f"Removed role {role.name} from {m.display_name}."
-
-        if name == "edit_member":
-            m = _find_member(guild, args["name_or_id"])
-            if not m:
-                return f"Member '{args['name_or_id']}' not found."
-            new_nick = args["nickname"] or None
-            await m.edit(nick=new_nick, reason=reason)
-            return f"Set {m.name}'s nickname to {new_nick or '(cleared)'}."
 
         if name == "run_minigame":
             return await _run_minigame(
@@ -1590,14 +992,11 @@ async def chat_with_tools(
     convo = list(messages)
     last_text = ""
     did_tools = False
-    # Accumulate ALL hard tools across every turn so we send exactly ONE embed.
-    all_hard: list = []
 
     for _ in range(max_iters):
         try:
             resp = await _mistral_complete(messages=convo, tools=TOOLS, max_tokens=1024)
         except Exception as e:
-            await _flush_hard_confirm(all_hard, invoker=invoker, channel=channel)
             return f"Something went wrong: {e}"
 
         choice = resp.choices[0]
@@ -1605,7 +1004,6 @@ async def chat_with_tools(
         finish_reason = getattr(choice, "finish_reason", None)
         tool_calls = getattr(msg, "tool_calls", None) or []
 
-        # Break if model is done (no tool calls, or finish_reason is stop/end_turn).
         if not tool_calls or str(finish_reason) in ("stop", "end_turn", "FinishReason.stop"):
             candidate = (msg.content or "").strip()
             last_text = "" if _is_robotic(candidate) else candidate
@@ -1613,7 +1011,6 @@ async def chat_with_tools(
 
         did_tools = True
 
-        # Append assistant tool-call message.
         convo.append(
             {
                 "role": "assistant",
@@ -1636,7 +1033,6 @@ async def chat_with_tools(
             guild=guild,
             invoker=invoker,
             channel=channel,
-            hard_accumulator=all_hard,
         )
         for tc in tool_calls:
             convo.append(
@@ -1647,13 +1043,9 @@ async def chat_with_tools(
                 }
             )
 
-        # Inject silent forcing prompt so the model keeps working through
-        # multi-step lists without waiting for the user to prod it.
         convo.append({"role": "user", "content": _CONTINUE_PROMPT})
 
-    # Send ONE combined confirm embed for every hard action collected across all turns.
-    await _flush_hard_confirm(all_hard, invoker=invoker, channel=channel)
-    return last_text or ("Done." if did_tools else "")
+    return last_text or ("" if did_tools else "")
 
 
 async def _ddg_vqd(query: str, session: aiohttp.ClientSession) -> str | None:
@@ -2055,12 +1447,9 @@ async def on_message(message: discord.Message):
     # Use the fast plain-chat path for conversational messages; only spin up
     # the tool loop when the message actually looks like an action request.
     _ACTION_KEYWORDS = {
-        "create", "delete",
-        "search", "find", "send", "post", "move", "rename", "add", "remove",
-        "give", "role", "channel", "embed", "poll", "game", "trivia", "ping",
-        "reorder", "edit", "join", "leave", "voice", "grant", "revoke",
-        "image", "gif", "video", "youtube", "history", "audit", "members",
-        "insights", "broadcast", "scramble",
+        "search", "find", "send", "post", "embed", "poll", "game", "trivia",
+        "ping", "join", "leave", "voice", "image", "gif", "video", "youtube",
+        "history", "members", "insights", "scramble",
     }
     words = set(re.findall(r"[a-z]+", cleaned.lower()))
     needs_tools = bool(words & _ACTION_KEYWORDS)
