@@ -1658,10 +1658,24 @@ async def chat(messages: list[dict], *, max_tokens: int = 600) -> str:
 
 
 _CONTINUE_PROMPT = (
-    "⚙ [system] Execute ALL remaining tasks now — call the next batch of tools "
-    "immediately. Reply in plain text ONLY when every task from the original "
-    "request is fully done or queued for confirmation."
+    "⚙ [system] If there are more tasks left from the original request, call the "
+    "next tools now. If everything is done, reply naturally in 1-2 sentences — "
+    "no robotic confirmations, no 'understood', no 'no remaining tasks'."
 )
+
+# Patterns that indicate a useless robotic sign-off — suppress them.
+_ROBOTIC_PATTERNS = [
+    r"(?i)^(understood|noted|done|confirmed|complete)[.\s!]*$",
+    r"(?i)no (remaining|pending|outstanding) tasks?",
+    r"(?i)everything('s| is) (handled|done|complete|taken care of)",
+    r"(?i)all tasks? (have been |are )?(completed?|done|handled|executed)",
+    r"(?i)task(s)? complete",
+    r"(?i)^all (done|good|set)[.\s!]*$",
+]
+
+
+def _is_robotic(text: str) -> bool:
+    return any(re.search(p, text) for p in _ROBOTIC_PATTERNS)
 
 
 async def chat_with_tools(
@@ -1698,7 +1712,8 @@ async def chat_with_tools(
 
         # Break if model is done (no tool calls, or finish_reason is stop/end_turn).
         if not tool_calls or str(finish_reason) in ("stop", "end_turn", "FinishReason.stop"):
-            last_text = (msg.content or "").strip()
+            candidate = (msg.content or "").strip()
+            last_text = "" if _is_robotic(candidate) else candidate
             break
 
         did_tools = True
