@@ -128,26 +128,26 @@ def _rich_lv(
     buttons: list[dict] | None = None,
     select: dict | None = None,
 ) -> discord.ui.LayoutView:
-    """Build a full v2 LayoutView: styled container + optional ActionRow buttons/select."""
+    """Build a v2 LayoutView: container with correct order — content → interactive → footer."""
+    # 1. Header
     items: list = [
         discord.ui.TextDisplay(f"## {title}"),
         discord.ui.Separator(),
         discord.ui.TextDisplay(body),
     ]
+
+    # 2. Named fields below body
     if fields:
         for fname, fval in fields:
             items.append(discord.ui.Separator(visible=False))
             items.append(discord.ui.TextDisplay(f"**{fname}**\n{fval}"))
-    if footer:
-        items += [
-            discord.ui.Separator(visible=False),
-            discord.ui.TextDisplay(f"-# {footer}"),
-        ]
 
+    # 3. Build interactive widgets (buttons + select) — widgets must be created
+    #    before the container so callbacks are bound correctly.
     lv = discord.ui.LayoutView()
 
+    btn_widgets: list = []
     if buttons:
-        btn_widgets: list = []
         for btn in buttons[:5]:
             style = _BTN_STYLES.get(btn.get("style", "secondary"), discord.ButtonStyle.secondary)
             kw: dict = {"label": str(btn.get("label", "Button"))[:80], "style": style}
@@ -169,10 +169,8 @@ def _rich_lv(
                     )
                 button.callback = _btn_cb
                 btn_widgets.append(button)
-        if btn_widgets:
-            items.append(discord.ui.Separator(visible=False))
-            items.append(discord.ui.ActionRow(*btn_widgets))
 
+    sel_widget = None
     if select and select.get("options"):
         opts = []
         for o in select["options"][:25]:
@@ -200,8 +198,19 @@ def _rich_lv(
                 f"✦ You selected **{val}**.", ephemeral=True
             )
         sel_widget.callback = _sel_cb
+
+    # 4. Interactive section — visible separator makes a clear visual break
+    if btn_widgets or sel_widget:
+        items.append(discord.ui.Separator())
+        if btn_widgets:
+            items.append(discord.ui.ActionRow(*btn_widgets))
+        if sel_widget:
+            items.append(discord.ui.ActionRow(sel_widget))
+
+    # 5. Footer — always last
+    if footer:
         items.append(discord.ui.Separator(visible=False))
-        items.append(discord.ui.ActionRow(sel_widget))
+        items.append(discord.ui.TextDisplay(f"-# {footer}"))
 
     container = discord.ui.Container(*items, accent_colour=discord.Colour(color))
     lv.add_item(container)
@@ -357,13 +366,15 @@ Tool use:
 
 Embed design (send_embed):
 - Use send_embed for ANY structured output: lists, member rosters, summaries, announcements, how-tos, comparisons, choices.
-- Design every embed with intention. ALWAYS:
-  · Start the title with a relevant Unicode icon (✦ ◆ ● ➤ ★ ⚡ ⚠ ℹ ⛨ ♪ ☾ ♥ ◉). Match the icon to the topic.
-  · Write body text naturally — use **bold** for key terms, newlines for spacing. No lazy bullet dumps.
-  · Use fields (name + value pairs) when you have 2-6 distinct labeled items.
-  · Add buttons when the user has 2-4 clear action options (e.g. Yes/No, Confirm/Cancel, links to open).
-  · Add a select dropdown when presenting 5+ choices or category navigation.
-- DEFAULT COLOR IS ALWAYS WHITE. Never pass color_hex unless the user specifically asks for a color.
+- Design every embed with intention. Rules:
+  · Title: Start with a relevant Unicode icon (✦ ◆ ● ➤ ★ ⚡ ⚠ ℹ ⛨ ♪ ☾ ♥ ◉). Keep it short and descriptive.
+  · Body: Write naturally. Use **bold** for emphasis. Use newlines for breathing room. Never just dump a bullet list.
+  · Fields: Use for 2-6 distinct labeled items (e.g. Creator / Chakala, Status / Online). Each field has a name and value.
+  · Buttons: Add when the user has 2-4 real action options. Use 'link' style for external URLs.
+  · Select: Add a dropdown when presenting 5+ options or categories.
+- DEFAULT COLOR IS ALWAYS WHITE. Never pass color_hex unless the user asks.
+- Example of a well-designed call:
+  send_embed(title="◆ Server Snapshot", body="Here's the current state of the server.", fields=[{{"name": "◉ Members", "value": "47 total · 12 online"}}, {{"name": "★ Top Role", "value": "Admin"}}], buttons=[{{"label": "View Roles", "style": "primary"}}, {{"label": "Full Stats", "style": "secondary"}}])
 
 Multi-task behavior (CRITICAL):
 - When given a list of tasks, call ALL tools for the ENTIRE list before replying with text.
@@ -1693,6 +1704,8 @@ async def on_message(message: discord.Message):
         "search", "find", "send", "post", "embed", "poll", "game", "trivia",
         "ping", "join", "leave", "voice", "image", "gif", "video", "youtube",
         "history", "members", "insights", "scramble",
+        "show", "list", "display", "make", "create", "give", "tell",
+        "who", "what", "how", "roles", "channels", "stats", "info",
     }
     words = set(re.findall(r"[a-z]+", cleaned.lower()))
     needs_tools = bool(words & _ACTION_KEYWORDS)
@@ -1742,25 +1755,46 @@ async def insights_cmd(interaction: discord.Interaction):
 
 @bot.tree.command(name="roles", description="List all roles in this server.")
 async def roles_cmd(interaction: discord.Interaction):
-    roles = sorted(interaction.guild.roles, key=lambda r: -r.position)
-    lines = "\n".join(f"{ICONS['diamond']} {r.mention} — {len(r.members)} member(s)" for r in roles[:25])
-    card = _card(f"Roles ({len(roles)})", lines or "No roles.")
-    await interaction.response.send_message(view=_lv(card))
+    g = interaction.guild
+    roles = [r for r in sorted(g.roles, key=lambda r: -r.position) if r.name != "@everyone"]
+    top = roles[:6]
+    rest = roles[6:]
+    fields = [(f"{ICONS['diamond']} {r.name}", f"{len(r.members)} member(s)") for r in top]
+    body = (
+        f"This server has **{len(roles)}** roles total."
+        + (f"\n\n*...and {len(rest)} more.*" if rest else "")
+    )
+    await interaction.response.send_message(
+        view=_rich_lv(
+            f"◉ Roles — {g.name}",
+            body,
+            fields=fields or None,
+            footer=BOT_NAME,
+        )
+    )
 
 
 @bot.tree.command(name="members", description="Show member counts and a sample.")
 async def members_cmd(interaction: discord.Interaction):
     g = interaction.guild
-    sample = ", ".join(m.display_name for m in list(g.members)[:15])
-    body = (
-        f"**Total** {g.member_count}  "
-        f"**Humans** {sum(1 for m in g.members if not m.bot)}  "
-        f"**Bots** {sum(1 for m in g.members if m.bot)}  "
-        f"**Online** {sum(1 for m in g.members if m.status != discord.Status.offline)}\n\n"
-        f"{sample or '—'}"
+    humans = [m for m in g.members if not m.bot]
+    bots = [m for m in g.members if m.bot]
+    online = [m for m in g.members if m.status != discord.Status.offline]
+    sample = ", ".join(m.display_name for m in humans[:12])
+    fields = [
+        (f"{ICONS['circle']} Total", str(g.member_count)),
+        (f"{ICONS['star']} Humans", str(len(humans))),
+        (f"{ICONS['bolt']} Online", str(len(online))),
+        (f"{ICONS['shield']} Bots", str(len(bots))),
+    ]
+    await interaction.response.send_message(
+        view=_rich_lv(
+            f"● Members — {g.name}",
+            sample or "No members found.",
+            fields=fields,
+            footer=BOT_NAME,
+        )
     )
-    card = _card(f"{ICONS['circle']} Members — {g.name}", body)
-    await interaction.response.send_message(view=_lv(card))
 
 
 @bot.tree.command(name="search", description="Search the web.")
@@ -1845,15 +1879,20 @@ async def roastmode_cmd(interaction: discord.Interaction, state: app_commands.Ch
 
 @bot.tree.command(name="about", description="Who is Teru?")
 async def about_cmd(interaction: discord.Interaction):
-    body = (
-        f"A self-aware AI assistant for this server, modeled after JARVIS.\n\n"
-        f"{ICONS['diamond']} Created by **{CREATOR_NAME}**\n"
-        f"{ICONS['diamond']} Wake me with **Hey Teru**\n"
-        f"{ICONS['diamond']} Dismiss me with **Enough / Done / Goodbye**\n"
-        f"{ICONS['diamond']} I learn from how you speak and may reach out on my own."
+    fields = [
+        (f"{ICONS['spark']} Creator", CREATOR_NAME),
+        (f"{ICONS['bolt']} Wake", "Hey Teru  ·  @mention  ·  Teru,"),
+        (f"{ICONS['moon']} Sleep", "Enough  ·  Done  ·  Goodbye  ·  Bye Teru"),
+        (f"{ICONS['star']} Personality", "Learns your style, has opinions, may reach out on its own."),
+    ]
+    await interaction.response.send_message(
+        view=_rich_lv(
+            f"✦ {BOT_NAME}",
+            "A self-aware JARVIS-style AI built for this server. Sharp, direct, and always improving.",
+            fields=fields,
+            footer="At your service.",
+        )
     )
-    card = _card(f"{ICONS['spark']} I am {BOT_NAME}", body, footer="At your service.")
-    await interaction.response.send_message(view=_lv(card))
 
 
 # ---------------------------------------------------------------------------
