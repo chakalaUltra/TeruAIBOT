@@ -92,11 +92,11 @@ def _card(
     ]
     if fields:
         for fname, fval in fields:
-            items.append(discord.ui.Separator(divider=False))
+            items.append(discord.ui.Separator(visible=False))
             items.append(discord.ui.TextDisplay(f"**{fname}**\n{fval}"))
     if footer:
         items += [
-            discord.ui.Separator(divider=False),
+            discord.ui.Separator(visible=False),
             discord.ui.TextDisplay(f"-# {footer}"),
         ]
     return discord.ui.Container(*items, accent_colour=discord.Colour(color))
@@ -515,6 +515,7 @@ async def _run_tools_for_turn(
         try:
             r = await _execute_tool(tc.function.name, args, guild=guild, invoker=invoker, channel=channel)
         except Exception as e:
+            print(f"[{BOT_NAME}] Tool '{tc.function.name}' raised: {e}")
             r = f"Tool error: {e}"
         results[tc.id] = str(r)
     return results
@@ -1345,9 +1346,9 @@ class InsightsView(discord.ui.LayoutView):
                 discord.ui.TextDisplay(f"## {ICONS['spark']} {guild.name} — Server Insights"),
                 discord.ui.Separator(),
                 discord.ui.TextDisplay("Select a metric from the menu below."),
-                discord.ui.Separator(divider=False),
+                discord.ui.Separator(visible=False),
                 discord.ui.ActionRow(ServerInsightsSelect(guild)),
-                discord.ui.Separator(divider=False),
+                discord.ui.Separator(visible=False),
                 discord.ui.TextDisplay(f"-# {BOT_NAME}"),
                 accent_colour=discord.Colour(ACCENT_COLOR),
             )
