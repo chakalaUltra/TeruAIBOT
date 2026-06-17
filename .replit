@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "python-3.12"]
+modules = ["nodejs-20", "web", "python-3.11"]
 
 [deployment]
 router = "application"
@@ -32,8 +32,9 @@ args = "python bot/teru/teru.py"
 outputType = "console"
 
 [agent]
-stack = "PNPM_WORKSPACE"
+stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
+integrations = ["python_openai_ai_integrations:1.0.0"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
