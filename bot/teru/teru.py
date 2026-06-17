@@ -1625,17 +1625,36 @@ async def speak_in_voice(guild: discord.Guild, text: str) -> None:
     print(f"[{BOT_NAME}] TTS not supported with Mistral API, skipping voice reply.")
 
 
+async def _mistral_complete(*, messages: list[dict], tools: list | None = None, max_tokens: int = 600):
+    """Wrapper around Mistral chat.complete_async with exponential-backoff retry on 429."""
+    kwargs: dict = {"model": MODEL, "messages": messages, "max_tokens": max_tokens}
+    if tools is not None:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+
+    backoff = 2.0
+    for attempt in range(5):
+        try:
+            return await ai.chat.complete_async(**kwargs)
+        except Exception as e:
+            err = str(e)
+            is_rate_limit = "429" in err or "rate_limit" in err.lower() or "rate limit" in err.lower()
+            if is_rate_limit and attempt < 4:
+                wait = backoff * (2 ** attempt)
+                print(f"[{BOT_NAME}] Rate limited — retrying in {wait:.0f}s (attempt {attempt + 1}/5)")
+                await asyncio.sleep(wait)
+                continue
+            raise
+    raise RuntimeError("Mistral rate limit — all retries exhausted.")
+
+
 async def chat(messages: list[dict], *, max_tokens: int = 600) -> str:
-    """Plain chat — no tools. Used for suggestion text generation."""
+    """Plain chat — no tools."""
     try:
-        resp = await ai.chat.complete_async(
-            model=MODEL,
-            messages=messages,
-            max_tokens=max_tokens,
-        )
+        resp = await _mistral_complete(messages=messages, max_tokens=max_tokens)
         return (resp.choices[0].message.content or "").strip()
-    except Exception as e:  # pragma: no cover
-        return f"{ICONS['warn']} I hit a snag reaching my brain: `{e}`"
+    except Exception as e:
+        return f"I ran into an issue: {e}"
 
 
 _CONTINUE_PROMPT = (
@@ -1667,16 +1686,10 @@ async def chat_with_tools(
 
     for _ in range(max_iters):
         try:
-            resp = await ai.chat.complete_async(
-                model=MODEL,
-                messages=convo,
-                tools=TOOLS,
-                tool_choice="auto",
-                max_tokens=1024,
-            )
+            resp = await _mistral_complete(messages=convo, tools=TOOLS, max_tokens=1024)
         except Exception as e:
             await _flush_hard_confirm(all_hard, invoker=invoker, channel=channel)
-            return f"{ICONS['warn']} Brain error: `{e}`"
+            return f"Something went wrong: {e}"
 
         choice = resp.choices[0]
         msg = choice.message
