@@ -1652,7 +1652,7 @@ async def chat_with_tools(
     guild: discord.Guild,
     invoker: discord.Member,
     channel: discord.abc.Messageable,
-    max_iters: int = 16,
+    max_iters: int = 8,
 ) -> str:
     """Chat loop that lets the model invoke real Discord tools.
 
@@ -1673,17 +1673,19 @@ async def chat_with_tools(
                 messages=convo,
                 tools=TOOLS,
                 tool_choice="auto",
-                max_tokens=4096,
+                max_tokens=1024,
             )
         except Exception as e:
             await _flush_hard_confirm(all_hard, invoker=invoker, channel=channel)
             return f"{ICONS['warn']} Brain error: `{e}`"
 
-        msg = resp.choices[0].message
-        tool_calls = getattr(msg, "tool_calls", None)
+        choice = resp.choices[0]
+        msg = choice.message
+        finish_reason = getattr(choice, "finish_reason", None)
+        tool_calls = getattr(msg, "tool_calls", None) or []
 
-        if not tool_calls:
-            # Model returned text — it considers itself done.
+        # Break if model is done (no tool calls, or finish_reason is stop/end_turn).
+        if not tool_calls or str(finish_reason) in ("stop", "end_turn", "FinishReason.stop"):
             last_text = (msg.content or "").strip()
             break
 
@@ -2135,13 +2137,29 @@ async def on_message(message: discord.Message):
         *HISTORY[cid][-12:],
     ]
 
+    # Use the fast plain-chat path for conversational messages; only spin up
+    # the tool loop when the message actually looks like an action request.
+    _ACTION_KEYWORDS = {
+        "create", "delete", "kick", "ban", "unban", "mute", "unmute", "purge",
+        "search", "find", "send", "post", "move", "rename", "add", "remove",
+        "give", "role", "channel", "embed", "poll", "game", "trivia", "ping",
+        "reorder", "edit", "join", "leave", "voice", "grant", "revoke",
+        "image", "gif", "video", "youtube", "history", "audit", "members",
+        "insights", "broadcast", "scramble",
+    }
+    words = set(re.findall(r"[a-z]+", cleaned.lower()))
+    needs_tools = bool(words & _ACTION_KEYWORDS)
+
     async with message.channel.typing():
-        reply = await chat_with_tools(
-            msgs,
-            guild=message.guild,
-            invoker=message.author,
-            channel=message.channel,
-        )
+        if needs_tools:
+            reply = await chat_with_tools(
+                msgs,
+                guild=message.guild,
+                invoker=message.author,
+                channel=message.channel,
+            )
+        else:
+            reply = await chat(msgs, max_tokens=400)
     push_history(cid, "assistant", reply)
 
     if reply:
