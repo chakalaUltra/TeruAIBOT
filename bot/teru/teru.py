@@ -22,19 +22,18 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks, voice_recv
-from openai import AsyncOpenAI
+from mistralai.client import Mistral
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
 DISCORD_TOKEN = os.environ["DISCORD_BOT_TOKEN"]
-OPENAI_BASE_URL = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
-OPENAI_API_KEY = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY", "sk-placeholder")
+MISTRAL_API_KEY = os.environ["MISTRAL_API_KEY"]
 
 CREATOR_NAME = "Chakala"
 BOT_NAME = "Teru"
-MODEL = "gpt-5.2"
+MODEL = "mistral-large-latest"
 OWNER_ID = 1117540437016727612
 # Users the owner has temporarily allowed Teru to listen/reply to.
 GUEST_USER_IDS: set[int] = set()
@@ -181,10 +180,10 @@ class MemoryStore:
 memory = MemoryStore()
 
 # ---------------------------------------------------------------------------
-# OpenAI client
+# Mistral client
 # ---------------------------------------------------------------------------
 
-ai = AsyncOpenAI(base_url=OPENAI_BASE_URL, api_key=OPENAI_API_KEY)
+ai = Mistral(api_key=MISTRAL_API_KEY)
 
 
 SYSTEM_PROMPT = f"""You are {BOT_NAME}, a Discord bot built by {CREATOR_NAME}. Think less JARVIS, more a witty, no-filter best friend who also happens to be brilliant.
@@ -1589,83 +1588,8 @@ async def _handle_utterance(user_id: int, pcm: bytes) -> None:
             w.writeframes(pcm)
         wav_bytes = wav_buf.getvalue()
 
-        # Transcribe.
-        try:
-            transcript = await ai.audio.transcriptions.create(
-                model="whisper-1",
-                file=("speech.wav", wav_bytes, "audio/wav"),
-            )
-            text = (transcript.text or "").strip()
-        except Exception as e:
-            print(f"[{BOT_NAME}] Whisper failed: {e}")
-            return
-
-        if not text or len(text) < 2:
-            return
-        # Filter out junk transcriptions (Whisper often hallucinates "Thanks for watching!" on silence).
-        junk = {"thanks for watching!", "thank you.", "you", ".", "thanks for watching"}
-        if text.lower().strip(" .!,?") in {j.strip(" .!,?") for j in junk}:
-            return
-
-        print(f"[{BOT_NAME}] Heard {member.display_name}: {text}")
-
-        # Only respond if Teru was addressed — OR a follow-up window is open
-        # because he just replied recently in voice.
-        vc_channel_id = guild.voice_client.channel.id
-        last = LAST_REPLY_AT.get(vc_channel_id)
-        in_followup = bool(
-            last
-            and (datetime.now(timezone.utc) - last).total_seconds() < FOLLOWUP_WINDOW_SECONDS
-        )
-        if not addresses_teru(text) and not in_followup:
-            return
-
-        # Choose a text channel to mirror the conversation in.
-        text_channel = None
-        for ch in guild.text_channels:
-            if ch.permissions_for(guild.me).send_messages:
-                text_channel = ch
-                break
-
-        # Treat this like a normal message + run tools loop.
-        cid = (text_channel.id if text_channel else guild.voice_client.channel.id)
-        push_history(cid, "user", f"{member.display_name} (voice): {text}")
-        style = memory.style_for(member.id)
-        style.ingest(text)
-
-        msgs = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "system",
-                "content": (
-                    f"This message was spoken aloud in voice channel "
-                    f"{guild.voice_client.channel.name}. Reply concisely (1-2 "
-                    "sentences) since it'll be spoken aloud. Speaker style: "
-                    f"{style.summary()}"
-                ),
-            },
-            *HISTORY[cid][-10:],
-        ]
-
-        reply = await chat_with_tools(
-            msgs,
-            guild=guild,
-            invoker=member,
-            channel=text_channel or guild.voice_client.channel,
-        )
-        push_history(cid, "assistant", reply)
-
-        if reply:
-            if text_channel:
-                try:
-                    await text_channel.send(
-                        f"{ICONS['music']} **{member.display_name}** said: _{text}_\n"
-                        f"{ICONS['arrow']} {reply}"
-                    )
-                except discord.HTTPException:
-                    pass
-            LAST_REPLY_AT[guild.voice_client.channel.id] = datetime.now(timezone.utc)
-            await speak_in_voice(guild, reply)
+        # Voice transcription not available with Mistral API — skip.
+        print(f"[{BOT_NAME}] Voice transcription not supported with Mistral API, skipping.")
     finally:
         VOICE_PROCESSING.discard(user_id)
 
@@ -1698,56 +1622,17 @@ async def speak_in_voice(guild: discord.Guild, text: str) -> None:
     vc = guild.voice_client
     if not vc or not vc.is_connected():
         return
-    # Trim very long replies to avoid huge audio.
-    snippet = text[:600]
-    try:
-        response = await ai.audio.speech.create(
-            model="tts-1",
-            voice="onyx",  # Deep male voice.
-            input=snippet,
-        )
-        audio_bytes = response.read() if hasattr(response, "read") else response.content
-        if asyncio.iscoroutine(audio_bytes):
-            audio_bytes = await audio_bytes
-    except Exception as e:
-        print(f"[{BOT_NAME}] TTS failed: {e}")
-        return
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-    try:
-        tmp.write(audio_bytes)
-        tmp.flush()
-        tmp.close()
-        # Wait for any current playback to finish.
-        while vc.is_playing():
-            await asyncio.sleep(0.2)
-        source = discord.FFmpegPCMAudio(tmp.name)
-        done = asyncio.Event()
-
-        def _after(_err):
-            try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
-            bot.loop.call_soon_threadsafe(done.set)
-
-        vc.play(source, after=_after)
-        await done.wait()
-    except Exception as e:
-        print(f"[{BOT_NAME}] Voice playback failed: {e}")
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
+    # TTS not available with Mistral API — skip.
+    print(f"[{BOT_NAME}] TTS not supported with Mistral API, skipping voice reply.")
 
 
 async def chat(messages: list[dict], *, max_tokens: int = 600) -> str:
     """Plain chat — no tools. Used for suggestion text generation."""
     try:
-        resp = await ai.chat.completions.create(
+        resp = await ai.chat.complete_async(
             model=MODEL,
             messages=messages,
-            max_completion_tokens=max_tokens,
+            max_tokens=max_tokens,
         )
         return (resp.choices[0].message.content or "").strip()
     except Exception as e:  # pragma: no cover
@@ -1783,12 +1668,12 @@ async def chat_with_tools(
 
     for _ in range(max_iters):
         try:
-            resp = await ai.chat.completions.create(
+            resp = await ai.chat.complete_async(
                 model=MODEL,
                 messages=convo,
                 tools=TOOLS,
                 tool_choice="auto",
-                max_completion_tokens=4096,
+                max_tokens=4096,
             )
         except Exception as e:
             await _flush_hard_confirm(all_hard, invoker=invoker, channel=channel)
