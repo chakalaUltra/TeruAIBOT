@@ -287,51 +287,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "kick_member",
-            "description": "Kick a member by display name or mention id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name_or_id": {"type": "string"},
-                    "reason": {"type": "string"},
-                },
-                "required": ["name_or_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ban_member",
-            "description": "Ban a member by display name or id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name_or_id": {"type": "string"},
-                    "reason": {"type": "string"},
-                },
-                "required": ["name_or_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mute_member",
-            "description": "Timeout (mute) a member for N minutes.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name_or_id": {"type": "string"},
-                    "minutes": {"type": "integer"},
-                },
-                "required": ["name_or_id", "minutes"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "web_lookup",
             "description": "Search the web for current information.",
             "parameters": {
@@ -370,18 +325,6 @@ TOOLS = [
                 "properties": {
                     "name_or_id": {"type": "string"},
                 },
-                "required": ["name_or_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "unban_user",
-            "description": "Unban a previously banned user by name or id.",
-            "parameters": {
-                "type": "object",
-                "properties": {"name_or_id": {"type": "string"}},
                 "required": ["name_or_id"],
             },
         },
@@ -788,19 +731,12 @@ def _find_member(guild: discord.Guild, name_or_id: str) -> discord.Member | None
 
 
 HARD_TOOLS = {
-    "ban_member",
-    "kick_member",
-    "unban_user",
     "delete_text_channel",
     "delete_voice_channel",
     "delete_role",
 }
 
 TOOL_PERMS: dict[str, str] = {
-    "kick_member": "kick_members",
-    "ban_member": "ban_members",
-    "unban_user": "ban_members",
-    "mute_member": "moderate_members",
     "delete_text_channel": "manage_channels",
     "delete_voice_channel": "manage_channels",
     "create_text_channel": "manage_channels",
@@ -822,9 +758,6 @@ TOOL_PERMS: dict[str, str] = {
 def _summarize_action(name: str, args: dict) -> str:
     noi = args.get("name_or_id") or args.get("name", "?")
     labels: dict[str, str] = {
-        "ban_member": f"Ban {noi}",
-        "kick_member": f"Kick {noi}",
-        "unban_user": f"Unban {noi}",
         "delete_text_channel": f"Delete text channel #{noi}",
         "delete_voice_channel": f"Delete voice channel {noi}",
         "delete_role": f"Delete role {noi}",
@@ -833,18 +766,18 @@ def _summarize_action(name: str, args: dict) -> str:
 
 
 class BatchConfirmView(discord.ui.View):
-    """Single confirmation embed covering one or many destructive actions."""
+    """Single confirmation embed for destructive channel/role actions."""
 
     def __init__(self, owner_id: int, executors: list):
         super().__init__(timeout=120)
         self.owner_id = owner_id
-        self.executors = executors  # list of (summary_str, async_callable)
+        self.executors = executors
         self.done = False
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
-                f"{ICONS['lock']} Only {CREATOR_NAME} can confirm.", ephemeral=True
+                "Only the owner can confirm this.", ephemeral=True
             )
             return False
         return True
@@ -857,7 +790,7 @@ class BatchConfirmView(discord.ui.View):
         except discord.HTTPException:
             pass
 
-    @discord.ui.button(label="✓ Confirm All", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button):
         if self.done:
             return
@@ -868,19 +801,19 @@ class BatchConfirmView(discord.ui.View):
         for summary, executor in self.executors:
             try:
                 r = await executor()
-                lines.append(f"{ICONS['check']} {r}")
+                lines.append(f"Done — {r}")
             except Exception as e:
-                lines.append(f"{ICONS['warn']} {summary}: {e}")
+                lines.append(f"Failed — {summary}: {e}")
         await interaction.followup.send("\n".join(lines) or "Done.")
 
-    @discord.ui.button(label="✗ Cancel All", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button):
         if self.done:
             return
         self.done = True
         await interaction.response.defer()
         await self._disable(interaction)
-        await interaction.followup.send(f"{ICONS['moon']} All cancelled.")
+        await interaction.followup.send("Cancelled.")
 
 
 async def _run_tools_for_turn(
@@ -1039,22 +972,6 @@ async def _execute_tool(
             await role.delete(reason=reason)
             return f"Deleted role {role.name}."
 
-        if name == "unban_user":
-            target_str = args["name_or_id"]
-            target_obj = None
-            async for entry in guild.bans():
-                if (
-                    str(entry.user.id) == target_str
-                    or entry.user.name.lower() == target_str.lower()
-                    or str(entry.user) == target_str
-                ):
-                    target_obj = entry.user
-                    break
-            if not target_obj:
-                return f"No ban found for '{target_str}'."
-            await guild.unban(target_obj, reason=reason)
-            return f"Unbanned {target_obj}."
-
         if name == "send_embed":
             target = channel
             if args.get("channel"):
@@ -1088,28 +1005,6 @@ async def _execute_tool(
                 for m in members[:limit]
             ]
             return f"Total members: {guild.member_count}.\n" + "\n".join(lines)
-
-        if name == "kick_member":
-            m = _find_member(guild, args["name_or_id"])
-            if not m:
-                return f"Member '{args['name_or_id']}' not found."
-            await m.kick(reason=args.get("reason", reason))
-            return f"Kicked {m.display_name}."
-
-        if name == "ban_member":
-            m = _find_member(guild, args["name_or_id"])
-            if not m:
-                return f"Member '{args['name_or_id']}' not found."
-            await m.ban(reason=args.get("reason", reason), delete_message_days=0)
-            return f"Banned {m.display_name}."
-
-        if name == "mute_member":
-            m = _find_member(guild, args["name_or_id"])
-            if not m:
-                return f"Member '{args['name_or_id']}' not found."
-            mins = max(1, min(int(args["minutes"]), 60 * 24 * 7))
-            await m.timeout(discord.utils.utcnow() + timedelta(minutes=mins))
-            return f"Muted {m.display_name} for {mins} minutes."
 
         if name == "web_lookup":
             return await web_search(args["query"])
@@ -1965,53 +1860,46 @@ class ServerInsightsSelect(discord.ui.Select):
     def __init__(self, guild: discord.Guild):
         self.guild = guild
         options = [
-            discord.SelectOption(label="● Members", value="members"),
-            discord.SelectOption(label="◆ Roles", value="roles"),
-            discord.SelectOption(label="▣ Channels", value="channels"),
-            discord.SelectOption(label="✦ Boosts", value="boosts"),
-            discord.SelectOption(label="⚡ Online Now", value="online"),
+            discord.SelectOption(label="Members", value="members", description="Total, bots, humans"),
+            discord.SelectOption(label="Roles", value="roles", description="Top roles by position"),
+            discord.SelectOption(label="Channels", value="channels", description="Text, voice, categories"),
+            discord.SelectOption(label="Boosts", value="boosts", description="Boost level and count"),
+            discord.SelectOption(label="Online Now", value="online", description="Who is currently online"),
         ]
-        super().__init__(placeholder="Pick an insight...", options=options)
+        super().__init__(placeholder="Select a metric...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
         v = self.values[0]
         g = self.guild
+        embed = discord.Embed(color=ACCENT_COLOR)
+        embed.set_author(name=f"{g.name} — {v.title()}", icon_url=g.icon.url if g.icon else None)
+
         if v == "members":
-            text = (
-                f"{ICONS['circle']} Total members: **{g.member_count}**\n"
-                f"{ICONS['circle']} Bots: **{sum(1 for m in g.members if m.bot)}**\n"
-                f"{ICONS['circle']} Humans: **{sum(1 for m in g.members if not m.bot)}**"
-            )
+            embed.add_field(name="Total", value=str(g.member_count), inline=True)
+            embed.add_field(name="Humans", value=str(sum(1 for m in g.members if not m.bot)), inline=True)
+            embed.add_field(name="Bots", value=str(sum(1 for m in g.members if m.bot)), inline=True)
         elif v == "roles":
             roles = sorted(g.roles, key=lambda r: -r.position)[:15]
-            text = "\n".join(
-                f"{ICONS['diamond']} {r.name} — {len(r.members)} member(s)" for r in roles
-            )
+            lines = "\n".join(f"{r.name} — {len(r.members)}" for r in roles)
+            embed.description = lines or "No roles."
         elif v == "channels":
-            text = (
-                f"{ICONS['square']} Text: {len(g.text_channels)}\n"
-                f"{ICONS['square']} Voice: {len(g.voice_channels)}\n"
-                f"{ICONS['square']} Categories: {len(g.categories)}\n"
-                f"{ICONS['square']} Threads: {len(g.threads)}"
-            )
+            embed.add_field(name="Text", value=str(len(g.text_channels)), inline=True)
+            embed.add_field(name="Voice", value=str(len(g.voice_channels)), inline=True)
+            embed.add_field(name="Categories", value=str(len(g.categories)), inline=True)
+            embed.add_field(name="Threads", value=str(len(g.threads)), inline=True)
         elif v == "boosts":
-            text = (
-                f"{ICONS['spark']} Boost level: **{g.premium_tier}**\n"
-                f"{ICONS['spark']} Boosters: **{g.premium_subscription_count}**"
-            )
+            embed.add_field(name="Boost Level", value=str(g.premium_tier), inline=True)
+            embed.add_field(name="Boosters", value=str(g.premium_subscription_count), inline=True)
         else:
-            online = [
-                m for m in g.members
-                if m.status != discord.Status.offline and not m.bot
-            ]
-            text = f"{ICONS['bolt']} Online right now: **{len(online)}**\n" + ", ".join(
-                m.display_name for m in online[:20]
-            )
-        embed = discord.Embed(
-            title=f"{ICONS['eye']} Server insight — {v.title()}",
-            description=text,
-            color=ACCENT_COLOR,
-        )
+            online = [m for m in g.members if m.status != discord.Status.offline and not m.bot]
+            embed.add_field(name="Online", value=str(len(online)), inline=True)
+            if online:
+                embed.add_field(
+                    name="Who's here",
+                    value=", ".join(m.display_name for m in online[:20]),
+                    inline=False,
+                )
+        embed.set_footer(text=BOT_NAME)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -2167,7 +2055,7 @@ async def on_message(message: discord.Message):
     # Use the fast plain-chat path for conversational messages; only spin up
     # the tool loop when the message actually looks like an action request.
     _ACTION_KEYWORDS = {
-        "create", "delete", "kick", "ban", "unban", "mute", "unmute", "purge",
+        "create", "delete",
         "search", "find", "send", "post", "move", "rename", "add", "remove",
         "give", "role", "channel", "embed", "poll", "game", "trivia", "ping",
         "reorder", "edit", "join", "leave", "voice", "grant", "revoke",
@@ -2194,162 +2082,49 @@ async def on_message(message: discord.Message):
         LAST_REPLY_AT[cid] = datetime.now(timezone.utc)
         asyncio.create_task(speak_in_voice(message.guild, reply))
 
+    # Occasionally drop a relevant gif (12% chance, conversational replies only).
+    if reply and not needs_tools and random.random() < 0.12:
+        try:
+            keyword = cleaned.split()[0] if cleaned.split() else "reaction"
+            urls = await search_media(keyword, kind="gif", count=1)
+            if urls:
+                file = await _fetch_file(urls[0])
+                if file:
+                    await message.channel.send(file=file)
+        except Exception:
+            pass
+
     await bot.process_commands(message)
 
 
 # ---------------------------------------------------------------------------
-# Slash commands — moderation + utilities
+# Slash commands — utilities
 # ---------------------------------------------------------------------------
-
-
-def mod_check(member: discord.Member, perm: str) -> bool:
-    return getattr(member.guild_permissions, perm, False)
-
-
-@bot.tree.command(name="kick", description="Kick a member from the server.")
-@app_commands.describe(member="Member to kick", reason="Reason")
-async def kick_cmd(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    reason: str = "No reason provided",
-):
-    if not mod_check(interaction.user, "kick_members"):
-        return await interaction.response.send_message(
-            f"{ICONS['lock']} You lack kick permissions.", ephemeral=True
-        )
-    try:
-        await member.kick(reason=f"By {interaction.user}: {reason}")
-        embed = discord.Embed(
-            title=f"{ICONS['flag']} Member kicked",
-            description=f"**{member}** was kicked.\nReason: {reason}",
-            color=0xFFFFFF,
-        )
-        await interaction.response.send_message(embed=embed)
-    except discord.Forbidden:
-        await interaction.response.send_message(
-            f"{ICONS['cross']} I don't have permission to kick that member.",
-            ephemeral=True,
-        )
-
-
-@bot.tree.command(name="ban", description="Ban a member from the server.")
-@app_commands.describe(member="Member to ban", reason="Reason")
-async def ban_cmd(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    reason: str = "No reason provided",
-):
-    if not mod_check(interaction.user, "ban_members"):
-        return await interaction.response.send_message(
-            f"{ICONS['lock']} You lack ban permissions.", ephemeral=True
-        )
-    try:
-        await member.ban(reason=f"By {interaction.user}: {reason}", delete_message_days=0)
-        embed = discord.Embed(
-            title=f"{ICONS['shield']} Member banned",
-            description=f"**{member}** was banned.\nReason: {reason}",
-            color=0xFFFFFF,
-        )
-        await interaction.response.send_message(embed=embed)
-    except discord.Forbidden:
-        await interaction.response.send_message(
-            f"{ICONS['cross']} I lack permission to ban them.", ephemeral=True
-        )
-
-
-@bot.tree.command(name="unban", description="Unban a user by ID or name#discrim.")
-@app_commands.describe(user="User ID or name to unban")
-async def unban_cmd(interaction: discord.Interaction, user: str):
-    if not mod_check(interaction.user, "ban_members"):
-        return await interaction.response.send_message(
-            f"{ICONS['lock']} You lack ban permissions.", ephemeral=True
-        )
-    bans = [b async for b in interaction.guild.bans()]
-    target = None
-    for entry in bans:
-        if str(entry.user.id) == user or str(entry.user) == user or entry.user.name == user:
-            target = entry.user
-            break
-    if not target:
-        return await interaction.response.send_message(
-            f"{ICONS['cross']} Couldn't find a ban for `{user}`.", ephemeral=True
-        )
-    await interaction.guild.unban(target)
-    await interaction.response.send_message(
-        f"{ICONS['check']} Unbanned **{target}**."
-    )
-
-
-@bot.tree.command(name="mute", description="Timeout a member for N minutes.")
-@app_commands.describe(member="Member", minutes="Duration in minutes (1-10080)")
-async def mute_cmd(
-    interaction: discord.Interaction, member: discord.Member, minutes: int
-):
-    if not mod_check(interaction.user, "moderate_members"):
-        return await interaction.response.send_message(
-            f"{ICONS['lock']} You lack moderate permissions.", ephemeral=True
-        )
-    minutes = max(1, min(minutes, 60 * 24 * 7))
-    until = discord.utils.utcnow() + discord.utils.utcnow().__class__.resolution * 0
-    from datetime import timedelta
-
-    until = discord.utils.utcnow() + timedelta(minutes=minutes)
-    try:
-        await member.timeout(until, reason=f"By {interaction.user}")
-        await interaction.response.send_message(
-            f"{ICONS['lock']} Muted **{member}** for {minutes} minute(s)."
-        )
-    except discord.Forbidden:
-        await interaction.response.send_message(
-            f"{ICONS['cross']} Can't mute them.", ephemeral=True
-        )
-
-
-@bot.tree.command(name="unmute", description="Remove a member's timeout.")
-async def unmute_cmd(interaction: discord.Interaction, member: discord.Member):
-    if not mod_check(interaction.user, "moderate_members"):
-        return await interaction.response.send_message(
-            f"{ICONS['lock']} You lack permissions.", ephemeral=True
-        )
-    await member.timeout(None)
-    await interaction.response.send_message(
-        f"{ICONS['check']} Removed timeout from **{member}**."
-    )
-
-
-@bot.tree.command(name="purge", description="Delete the last N messages (max 100).")
-async def purge_cmd(interaction: discord.Interaction, count: int):
-    if not mod_check(interaction.user, "manage_messages"):
-        return await interaction.response.send_message(
-            f"{ICONS['lock']} You lack manage messages.", ephemeral=True
-        )
-    count = max(1, min(count, 100))
-    await interaction.response.defer(ephemeral=True)
-    deleted = await interaction.channel.purge(limit=count)
-    await interaction.followup.send(
-        f"{ICONS['check']} Cleared **{len(deleted)}** message(s).", ephemeral=True
-    )
 
 
 @bot.tree.command(name="insights", description="Open the server insights panel.")
 async def insights_cmd(interaction: discord.Interaction):
+    g = interaction.guild
     embed = discord.Embed(
-        title=f"{ICONS['eye']} {interaction.guild.name} — Server Insights",
-        description="Pick a metric below.",
+        title=f"{g.name} — Server Insights",
+        description="Select a metric from the menu below.",
         color=ACCENT_COLOR,
     )
-    await interaction.response.send_message(embed=embed, view=InsightsView(interaction.guild))
+    embed.set_thumbnail(url=g.icon.url if g.icon else None)
+    embed.set_footer(text=BOT_NAME)
+    await interaction.response.send_message(embed=embed, view=InsightsView(g))
 
 
 @bot.tree.command(name="roles", description="List all roles in this server.")
 async def roles_cmd(interaction: discord.Interaction):
     roles = sorted(interaction.guild.roles, key=lambda r: -r.position)
-    pages = [roles[i : i + 25] for i in range(0, len(roles), 25)]
+    lines = "\n".join(f"{r.mention} — {len(r.members)} member(s)" for r in roles[:25])
     embed = discord.Embed(
-        title=f"{ICONS['diamond']} Roles ({len(roles)})",
-        description="\n".join(f"{ICONS['arrow']} {r.mention} — {len(r.members)}" for r in pages[0]),
+        title=f"Roles ({len(roles)})",
+        description=lines or "No roles.",
         color=ACCENT_COLOR,
     )
+    embed.set_footer(text=BOT_NAME)
     await interaction.response.send_message(embed=embed)
 
 
@@ -2357,17 +2132,18 @@ async def roles_cmd(interaction: discord.Interaction):
 async def members_cmd(interaction: discord.Interaction):
     g = interaction.guild
     sample = ", ".join(m.display_name for m in list(g.members)[:15])
-    embed = discord.Embed(
-        title=f"{ICONS['circle']} Members of {g.name}",
-        color=ACCENT_COLOR,
-    )
-    embed.add_field(name="Total", value=str(g.member_count))
-    embed.add_field(name="Bots", value=str(sum(1 for m in g.members if m.bot)))
+    embed = discord.Embed(title=f"Members — {g.name}", color=ACCENT_COLOR)
+    embed.add_field(name="Total", value=str(g.member_count), inline=True)
+    embed.add_field(name="Humans", value=str(sum(1 for m in g.members if not m.bot)), inline=True)
+    embed.add_field(name="Bots", value=str(sum(1 for m in g.members if m.bot)), inline=True)
     embed.add_field(
         name="Online",
         value=str(sum(1 for m in g.members if m.status != discord.Status.offline)),
+        inline=True,
     )
     embed.add_field(name="Sample", value=sample or "—", inline=False)
+    embed.set_thumbnail(url=g.icon.url if g.icon else None)
+    embed.set_footer(text=BOT_NAME)
     await interaction.response.send_message(embed=embed)
 
 
@@ -2382,17 +2158,14 @@ async def search_cmd(interaction: discord.Interaction, query: str):
             {
                 "role": "user",
                 "content": (
-                    f"Summarize these search results for the question '{query}' in 3-4 sentences, "
-                    f"then list 3 source links:\n\n{raw}"
+                    f"Summarize these search results for '{query}' in 3-4 clear sentences, "
+                    f"then list up to 3 source links:\n\n{raw}"
                 ),
             },
         ]
     )
-    embed = discord.Embed(
-        title=f"{ICONS['search']} {query}",
-        description=summary[:4000],
-        color=ACCENT_COLOR,
-    )
+    embed = discord.Embed(title=query, description=summary[:4000], color=ACCENT_COLOR)
+    embed.set_footer(text=f"{BOT_NAME} — web search")
     await interaction.followup.send(embed=embed)
 
 
@@ -2410,8 +2183,8 @@ async def embed_cmd(
             color = int(color_hex.lstrip("#"), 16)
         except ValueError:
             pass
-    embed = discord.Embed(title=f"{ICONS['spark']} {title}", description=body, color=color)
-    embed.set_footer(text=f"Sent by {interaction.user.display_name} via {BOT_NAME}")
+    embed = discord.Embed(title=title, description=body, color=color)
+    embed.set_footer(text=f"via {BOT_NAME} · {interaction.user.display_name}")
     await interaction.response.send_message(embed=embed)
 
 
