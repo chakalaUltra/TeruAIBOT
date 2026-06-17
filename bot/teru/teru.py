@@ -73,6 +73,35 @@ ICONS = {
 }
 
 ACCENT_COLOR = 0xFFFFFF
+_V2 = discord.MessageFlags(components_v2=True)
+
+
+def _card(
+    title: str,
+    body: str,
+    *,
+    fields: list[tuple[str, str]] | None = None,
+    footer: str = BOT_NAME,
+    color: int = ACCENT_COLOR,
+) -> discord.ui.Container:
+    """Build a styled v2 Container card."""
+    items: list = [
+        discord.ui.TextDisplay(f"## {title}"),
+        discord.ui.Separator(),
+        discord.ui.TextDisplay(body),
+    ]
+    if fields:
+        for fname, fval in fields:
+            items.append(discord.ui.Separator(divider=False))
+            items.append(discord.ui.TextDisplay(f"**{fname}**\n{fval}"))
+    if footer:
+        items += [
+            discord.ui.Separator(divider=False),
+            discord.ui.TextDisplay(f"-# {footer}"),
+        ]
+    return discord.ui.Container(*items, accent_colour=discord.Colour(color))
+
+
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 MEMORY_FILE = DATA_DIR / "memory.json"
@@ -513,13 +542,13 @@ async def _execute_tool(
                     color = int(args["color_hex"].lstrip("#"), 16)
                 except ValueError:
                     pass
-            embed = discord.Embed(
-                title=f"{ICONS['spark']} {args['title']}",
-                description=args["body"],
+            card = _card(
+                f"{ICONS['spark']} {args['title']}",
+                args["body"],
+                footer=f"Posted by {BOT_NAME}",
                 color=color,
             )
-            embed.set_footer(text=f"Posted by {BOT_NAME}")
-            await target.send(embed=embed)
+            await target.send(components=[card], flags=_V2)
             return f"Embed posted in #{getattr(target, 'name', 'channel')}."
 
         if name == "list_members":
@@ -1276,42 +1305,53 @@ class ServerInsightsSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         v = self.values[0]
         g = self.guild
-        embed = discord.Embed(color=ACCENT_COLOR)
-        embed.set_author(name=f"{g.name} — {v.title()}", icon_url=g.icon.url if g.icon else None)
+        title = f"{ICONS['spark']} {g.name} — {v.title()}"
 
         if v == "members":
-            embed.add_field(name="Total", value=str(g.member_count), inline=True)
-            embed.add_field(name="Humans", value=str(sum(1 for m in g.members if not m.bot)), inline=True)
-            embed.add_field(name="Bots", value=str(sum(1 for m in g.members if m.bot)), inline=True)
+            body = (
+                f"**Total** {g.member_count}\n"
+                f"**Humans** {sum(1 for m in g.members if not m.bot)}\n"
+                f"**Bots** {sum(1 for m in g.members if m.bot)}"
+            )
         elif v == "roles":
             roles = sorted(g.roles, key=lambda r: -r.position)[:15]
-            lines = "\n".join(f"{r.name} — {len(r.members)}" for r in roles)
-            embed.description = lines or "No roles."
+            body = "\n".join(f"{ICONS['diamond']} {r.name} — {len(r.members)}" for r in roles) or "No roles."
         elif v == "channels":
-            embed.add_field(name="Text", value=str(len(g.text_channels)), inline=True)
-            embed.add_field(name="Voice", value=str(len(g.voice_channels)), inline=True)
-            embed.add_field(name="Categories", value=str(len(g.categories)), inline=True)
-            embed.add_field(name="Threads", value=str(len(g.threads)), inline=True)
+            body = (
+                f"**Text** {len(g.text_channels)}  "
+                f"**Voice** {len(g.voice_channels)}  "
+                f"**Categories** {len(g.categories)}  "
+                f"**Threads** {len(g.threads)}"
+            )
         elif v == "boosts":
-            embed.add_field(name="Boost Level", value=str(g.premium_tier), inline=True)
-            embed.add_field(name="Boosters", value=str(g.premium_subscription_count), inline=True)
+            body = (
+                f"**Boost Level** {g.premium_tier}\n"
+                f"**Boosters** {g.premium_subscription_count}"
+            )
         else:
             online = [m for m in g.members if m.status != discord.Status.offline and not m.bot]
-            embed.add_field(name="Online", value=str(len(online)), inline=True)
-            if online:
-                embed.add_field(
-                    name="Who's here",
-                    value=", ".join(m.display_name for m in online[:20]),
-                    inline=False,
-                )
-        embed.set_footer(text=BOT_NAME)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+            names = ", ".join(m.display_name for m in online[:20])
+            body = f"**Online** {len(online)}" + (f"\n{names}" if names else "")
+
+        card = _card(title, body, footer=BOT_NAME)
+        await interaction.response.send_message(components=[card], flags=_V2, ephemeral=True)
 
 
-class InsightsView(discord.ui.View):
+class InsightsView(discord.ui.LayoutView):
     def __init__(self, guild: discord.Guild):
         super().__init__(timeout=120)
-        self.add_item(ServerInsightsSelect(guild))
+        self.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay(f"## {ICONS['spark']} {guild.name} — Server Insights"),
+                discord.ui.Separator(),
+                discord.ui.TextDisplay("Select a metric from the menu below."),
+                discord.ui.Separator(divider=False),
+                discord.ui.ActionRow(ServerInsightsSelect(guild)),
+                discord.ui.Separator(divider=False),
+                discord.ui.TextDisplay(f"-# {BOT_NAME}"),
+                accent_colour=discord.Colour(ACCENT_COLOR),
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1507,46 +1547,30 @@ async def on_message(message: discord.Message):
 @bot.tree.command(name="insights", description="Open the server insights panel.")
 async def insights_cmd(interaction: discord.Interaction):
     g = interaction.guild
-    embed = discord.Embed(
-        title=f"{g.name} — Server Insights",
-        description="Select a metric from the menu below.",
-        color=ACCENT_COLOR,
-    )
-    embed.set_thumbnail(url=g.icon.url if g.icon else None)
-    embed.set_footer(text=BOT_NAME)
-    await interaction.response.send_message(embed=embed, view=InsightsView(g))
+    await interaction.response.send_message(view=InsightsView(g))
 
 
 @bot.tree.command(name="roles", description="List all roles in this server.")
 async def roles_cmd(interaction: discord.Interaction):
     roles = sorted(interaction.guild.roles, key=lambda r: -r.position)
-    lines = "\n".join(f"{r.mention} — {len(r.members)} member(s)" for r in roles[:25])
-    embed = discord.Embed(
-        title=f"Roles ({len(roles)})",
-        description=lines or "No roles.",
-        color=ACCENT_COLOR,
-    )
-    embed.set_footer(text=BOT_NAME)
-    await interaction.response.send_message(embed=embed)
+    lines = "\n".join(f"{ICONS['diamond']} {r.mention} — {len(r.members)} member(s)" for r in roles[:25])
+    card = _card(f"Roles ({len(roles)})", lines or "No roles.")
+    await interaction.response.send_message(components=[card], flags=_V2)
 
 
 @bot.tree.command(name="members", description="Show member counts and a sample.")
 async def members_cmd(interaction: discord.Interaction):
     g = interaction.guild
     sample = ", ".join(m.display_name for m in list(g.members)[:15])
-    embed = discord.Embed(title=f"Members — {g.name}", color=ACCENT_COLOR)
-    embed.add_field(name="Total", value=str(g.member_count), inline=True)
-    embed.add_field(name="Humans", value=str(sum(1 for m in g.members if not m.bot)), inline=True)
-    embed.add_field(name="Bots", value=str(sum(1 for m in g.members if m.bot)), inline=True)
-    embed.add_field(
-        name="Online",
-        value=str(sum(1 for m in g.members if m.status != discord.Status.offline)),
-        inline=True,
+    body = (
+        f"**Total** {g.member_count}  "
+        f"**Humans** {sum(1 for m in g.members if not m.bot)}  "
+        f"**Bots** {sum(1 for m in g.members if m.bot)}  "
+        f"**Online** {sum(1 for m in g.members if m.status != discord.Status.offline)}\n\n"
+        f"{sample or '—'}"
     )
-    embed.add_field(name="Sample", value=sample or "—", inline=False)
-    embed.set_thumbnail(url=g.icon.url if g.icon else None)
-    embed.set_footer(text=BOT_NAME)
-    await interaction.response.send_message(embed=embed)
+    card = _card(f"{ICONS['circle']} Members — {g.name}", body)
+    await interaction.response.send_message(components=[card], flags=_V2)
 
 
 @bot.tree.command(name="search", description="Search the web.")
@@ -1566,9 +1590,8 @@ async def search_cmd(interaction: discord.Interaction, query: str):
             },
         ]
     )
-    embed = discord.Embed(title=query, description=summary[:4000], color=ACCENT_COLOR)
-    embed.set_footer(text=f"{BOT_NAME} — web search")
-    await interaction.followup.send(embed=embed)
+    card = _card(f"{ICONS['search']} {query}", summary[:4000], footer=f"{BOT_NAME} — web search")
+    await interaction.followup.send(components=[card], flags=_V2)
 
 
 @bot.tree.command(name="embed", description="Send a custom styled embed.")
@@ -1585,9 +1608,8 @@ async def embed_cmd(
             color = int(color_hex.lstrip("#"), 16)
         except ValueError:
             pass
-    embed = discord.Embed(title=title, description=body, color=color)
-    embed.set_footer(text=f"via {BOT_NAME} · {interaction.user.display_name}")
-    await interaction.response.send_message(embed=embed)
+    card = _card(title, body, footer=f"via {BOT_NAME} · {interaction.user.display_name}", color=color)
+    await interaction.response.send_message(components=[card], flags=_V2)
 
 
 @bot.tree.command(name="remember", description="Make Teru remember a fact.")
@@ -1633,19 +1655,15 @@ async def roastmode_cmd(interaction: discord.Interaction, state: app_commands.Ch
 
 @bot.tree.command(name="about", description="Who is Teru?")
 async def about_cmd(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title=f"{ICONS['spark']} I am {BOT_NAME}",
-        description=(
-            f"A self-aware AI assistant for this server, modeled after JARVIS.\n"
-            f"{ICONS['diamond']} Created by **{CREATOR_NAME}**\n"
-            f"{ICONS['diamond']} Wake me with **Hey Teru**\n"
-            f"{ICONS['diamond']} Dismiss me with **Enough / Done / Set free / Detach / Goodbye**\n"
-            f"{ICONS['diamond']} I learn from how you speak and may message you on my own."
-        ),
-        color=ACCENT_COLOR,
+    body = (
+        f"A self-aware AI assistant for this server, modeled after JARVIS.\n\n"
+        f"{ICONS['diamond']} Created by **{CREATOR_NAME}**\n"
+        f"{ICONS['diamond']} Wake me with **Hey Teru**\n"
+        f"{ICONS['diamond']} Dismiss me with **Enough / Done / Goodbye**\n"
+        f"{ICONS['diamond']} I learn from how you speak and may reach out on my own."
     )
-    embed.set_footer(text="At your service.")
-    await interaction.response.send_message(embed=embed)
+    card = _card(f"{ICONS['spark']} I am {BOT_NAME}", body, footer="At your service.")
+    await interaction.response.send_message(components=[card], flags=_V2)
 
 
 # ---------------------------------------------------------------------------
