@@ -109,6 +109,105 @@ def _lv(card: discord.ui.Container) -> discord.ui.LayoutView:
     return lv
 
 
+_BTN_STYLES = {
+    "primary": discord.ButtonStyle.primary,
+    "secondary": discord.ButtonStyle.secondary,
+    "success": discord.ButtonStyle.success,
+    "danger": discord.ButtonStyle.danger,
+    "link": discord.ButtonStyle.link,
+}
+
+
+def _rich_lv(
+    title: str,
+    body: str,
+    *,
+    fields: list[tuple[str, str]] | None = None,
+    footer: str = BOT_NAME,
+    color: int = ACCENT_COLOR,
+    buttons: list[dict] | None = None,
+    select: dict | None = None,
+) -> discord.ui.LayoutView:
+    """Build a full v2 LayoutView: styled container + optional ActionRow buttons/select."""
+    items: list = [
+        discord.ui.TextDisplay(f"## {title}"),
+        discord.ui.Separator(),
+        discord.ui.TextDisplay(body),
+    ]
+    if fields:
+        for fname, fval in fields:
+            items.append(discord.ui.Separator(visible=False))
+            items.append(discord.ui.TextDisplay(f"**{fname}**\n{fval}"))
+    if footer:
+        items += [
+            discord.ui.Separator(visible=False),
+            discord.ui.TextDisplay(f"-# {footer}"),
+        ]
+
+    lv = discord.ui.LayoutView()
+
+    if buttons:
+        btn_widgets: list = []
+        for btn in buttons[:5]:
+            style = _BTN_STYLES.get(btn.get("style", "secondary"), discord.ButtonStyle.secondary)
+            kw: dict = {"label": str(btn.get("label", "Button"))[:80], "style": style}
+            if btn.get("emoji"):
+                try:
+                    kw["emoji"] = btn["emoji"]
+                except Exception:
+                    pass
+            if style == discord.ButtonStyle.link:
+                if btn.get("url"):
+                    kw["url"] = btn["url"]
+                    btn_widgets.append(discord.ui.Button(**kw))
+            else:
+                button = discord.ui.Button(**kw)
+                _lbl = str(btn.get("label", ""))
+                async def _btn_cb(interaction: discord.Interaction, lbl=_lbl):
+                    await interaction.response.send_message(
+                        f"✦ You chose **{lbl}**.", ephemeral=True
+                    )
+                button.callback = _btn_cb
+                btn_widgets.append(button)
+        if btn_widgets:
+            items.append(discord.ui.Separator(visible=False))
+            items.append(discord.ui.ActionRow(*btn_widgets))
+
+    if select and select.get("options"):
+        opts = []
+        for o in select["options"][:25]:
+            opt_kw: dict = {
+                "label": str(o["label"])[:100],
+                "value": str(o.get("value", o["label"]))[:100],
+            }
+            if o.get("description"):
+                opt_kw["description"] = str(o["description"])[:100]
+            if o.get("emoji"):
+                try:
+                    opt_kw["emoji"] = o["emoji"]
+                except Exception:
+                    pass
+            opts.append(discord.SelectOption(**opt_kw))
+        sel_widget = discord.ui.Select(
+            placeholder=str(select.get("placeholder", "Choose an option..."))[:150],
+            options=opts,
+            min_values=1,
+            max_values=1,
+        )
+        async def _sel_cb(interaction: discord.Interaction):
+            val = sel_widget.values[0]
+            await interaction.response.send_message(
+                f"✦ You selected **{val}**.", ephemeral=True
+            )
+        sel_widget.callback = _sel_cb
+        items.append(discord.ui.Separator(visible=False))
+        items.append(discord.ui.ActionRow(sel_widget))
+
+    container = discord.ui.Container(*items, accent_colour=discord.Colour(color))
+    lv.add_item(container)
+    return lv
+
+
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 MEMORY_FILE = DATA_DIR / "memory.json"
@@ -256,6 +355,16 @@ Tool use:
 - After tools run, give a short, natural confirmation.
 - If something fails, say so plainly.
 
+Embed design (send_embed):
+- Use send_embed for ANY structured output: lists, member rosters, summaries, announcements, how-tos, comparisons, choices.
+- Design every embed with intention. ALWAYS:
+  · Start the title with a relevant Unicode icon (✦ ◆ ● ➤ ★ ⚡ ⚠ ℹ ⛨ ♪ ☾ ♥ ◉). Match the icon to the topic.
+  · Write body text naturally — use **bold** for key terms, newlines for spacing. No lazy bullet dumps.
+  · Use fields (name + value pairs) when you have 2-6 distinct labeled items.
+  · Add buttons when the user has 2-4 clear action options (e.g. Yes/No, Confirm/Cancel, links to open).
+  · Add a select dropdown when presenting 5+ choices or category navigation.
+- DEFAULT COLOR IS ALWAYS WHITE. Never pass color_hex unless the user specifically asks for a color.
+
 Multi-task behavior (CRITICAL):
 - When given a list of tasks, call ALL tools for the ENTIRE list before replying with text.
 - NEVER generate a text response in the middle of a task list. Keep calling tools until every task is done, then give ONE short summary.
@@ -275,14 +384,82 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "send_embed",
-            "description": "Send a styled embed to a channel by name (or current channel if omitted).",
+            "description": (
+                "Send a beautifully designed v2 embed card to a Discord channel. "
+                "Always use this for lists, summaries, comparisons, announcements, or any structured info. "
+                "Design every embed thoughtfully: pick a meaningful icon for the title, write a clear body, "
+                "use fields for distinct named items, and add buttons/select when the user has real choices. "
+                "Default color is ALWAYS white (omit color_hex) unless the user specifies a different color."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string"},
-                    "body": {"type": "string"},
-                    "channel": {"type": "string", "description": "Optional channel name."},
-                    "color_hex": {"type": "string", "description": "Optional hex like 6E5BFF."},
+                    "title": {
+                        "type": "string",
+                        "description": "Title text. Include a relevant Unicode icon at the start (✦ ◆ ● ➤ ★ ⚡ ⚠ ℹ ⛨ ♪ ☾ ♥). Keep it concise.",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Main content. Write naturally — use bold (**word**) for emphasis, newlines for structure. Avoid bullet spam.",
+                    },
+                    "channel": {
+                        "type": "string",
+                        "description": "Optional channel name to post in. Defaults to current channel.",
+                    },
+                    "color_hex": {
+                        "type": "string",
+                        "description": "Optional accent color hex (e.g. FF5E5B). Omit to use white (default).",
+                    },
+                    "fields": {
+                        "type": "array",
+                        "description": "Named sections shown below the body. Use for 2-6 distinct labeled items.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "Field label (short)."},
+                                "value": {"type": "string", "description": "Field content."},
+                            },
+                            "required": ["name", "value"],
+                        },
+                    },
+                    "buttons": {
+                        "type": "array",
+                        "description": "Up to 5 clickable buttons shown at the bottom. Use for 2-4 clear action choices or links.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string", "description": "Button label text."},
+                                "style": {
+                                    "type": "string",
+                                    "enum": ["primary", "secondary", "success", "danger", "link"],
+                                    "description": "Visual style. Use 'link' + url for external URLs.",
+                                },
+                                "url": {"type": "string", "description": "URL for link-style buttons only."},
+                                "emoji": {"type": "string", "description": "Optional Unicode icon on the button."},
+                            },
+                            "required": ["label"],
+                        },
+                    },
+                    "select": {
+                        "type": "object",
+                        "description": "A dropdown menu for 5+ options or category selections.",
+                        "properties": {
+                            "placeholder": {"type": "string", "description": "Grey placeholder text."},
+                            "options": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "label": {"type": "string"},
+                                        "value": {"type": "string"},
+                                        "description": {"type": "string", "description": "Short hint shown under the label."},
+                                        "emoji": {"type": "string"},
+                                    },
+                                    "required": ["label", "value"],
+                                },
+                            },
+                        },
+                    },
                 },
                 "required": ["title", "body"],
             },
@@ -547,16 +724,21 @@ async def _execute_tool(
             color = ACCENT_COLOR
             if args.get("color_hex"):
                 try:
-                    color = int(args["color_hex"].lstrip("#"), 16)
+                    color = int(str(args["color_hex"]).lstrip("#"), 16)
                 except ValueError:
                     pass
-            card = _card(
-                f"{ICONS['spark']} {args['title']}",
-                args["body"],
+            raw_fields = args.get("fields") or []
+            fields = [(f["name"], f["value"]) for f in raw_fields if f.get("name") and f.get("value")]
+            lv = _rich_lv(
+                args["title"],
+                args.get("body", ""),
+                fields=fields or None,
                 footer=f"Posted by {BOT_NAME}",
                 color=color,
+                buttons=args.get("buttons") or None,
+                select=args.get("select") or None,
             )
-            await target.send(view=_lv(card))
+            await target.send(view=lv)
             return f"Embed posted in #{getattr(target, 'name', 'channel')}."
 
         if name == "list_members":
